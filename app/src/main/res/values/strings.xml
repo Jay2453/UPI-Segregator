@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">UPI Segregator</string>
+    <string name="app_tagline">Track whom you pay, how much, and where it goes</string>
+    <string name="demo_mode_banner">LOCAL DEMO MODE • Prototype Only</string>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.2"
+        android:scaleY="1.2"
+        android:translateX="-10.8"
+        android:translateY="-10.8">
+        <!-- Modern UPI Segregator App Icon Glyph (Indian Rupee + Segregator Layers) -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M38,36h32v4h-12c4,2 6.5,6 7,10h5v4h-5c-1,7 -7,12 -15,12h-3l16,16h-7l-15,-15v-5h9c5,0 9,-3 10,-8h-19v-4h19c-0.5,-3 -3,-6 -9,-6h-10v-4z" />
+    </group>
+</vector>
