@@ -13,27 +13,36 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +51,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.upisegregator.app.data.local.entity.PaymentMethod
+import com.upisegregator.app.data.local.entity.TransactionEntity
+import com.upisegregator.app.data.local.entity.TransactionStatus
 import com.upisegregator.app.ui.components.DemoModeBanner
 import com.upisegregator.app.ui.components.SecondaryButton
 import com.upisegregator.app.ui.theme.AccentPurple
@@ -61,14 +74,19 @@ import com.upisegregator.app.ui.theme.SurfaceLight
 import com.upisegregator.app.ui.theme.TextMuted
 import com.upisegregator.app.ui.theme.TextPrimary
 import com.upisegregator.app.ui.theme.TextSecondary
+import com.upisegregator.app.util.PaiseUtils
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DemoHomeScreen(
     onExitDemo: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: DemoHomeViewModel = viewModel(factory = DemoHomeViewModel.Factory)
 ) {
-    val scrollState = rememberScrollState()
+    val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
@@ -116,135 +134,494 @@ fun DemoHomeScreen(
         },
         containerColor = BackgroundWhite
     ) { innerPadding ->
-        Column(
+        LazyColumn(
             modifier = modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .background(BackgroundWhite)
-                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp),
-            horizontalAlignment = Alignment.Start
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            item {
+                Spacer(modifier = Modifier.height(2.dp))
+                DemoModeBanner()
+            }
 
-            DemoModeBanner()
+            // Milestone 2 Room Database Stats Card
+            item {
+                DatabaseStatsCard(
+                    totalSpendingPaise = uiState.totalSpendingPaise,
+                    totalCount = uiState.totalCount,
+                    successCount = uiState.successCount,
+                    pendingCount = uiState.pendingCount,
+                    failedCount = uiState.failedCount,
+                    isResetting = uiState.isResetting,
+                    onReset = { viewModel.resetDemoData() }
+                )
+            }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Welcome Milestone 1 Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = CardShape,
-                colors = CardDefaults.cardColors(containerColor = SurfaceLight),
-                border = BorderStroke(1.dp, BorderLight)
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(PillShape)
-                                .background(PrimaryBlueLight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = null,
-                                tint = PrimaryBlue,
-                                modifier = Modifier.size(20.dp)
+            // Section Header: Live Room Database Transactions
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "DEMO TRANSACTIONS (ROOM DB)",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = TextMuted,
+                                letterSpacing = 1.sp,
+                                fontSize = 12.sp
                             )
-                        }
-                        Column {
-                            Text(
-                                text = "Milestone 1 Active",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
+                        )
+                        Text(
+                            text = "Reactive Flow • Stored as integer paise in SQLite",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = TextSecondary,
+                                fontSize = 11.sp
                             )
-                            Text(
-                                text = "Core UI foundation & navigation verified",
-                                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-                            )
-                        }
+                        )
                     }
+                    Box(
+                        modifier = Modifier
+                            .clip(PillShape)
+                            .background(PrimaryBlueLight)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "${uiState.recentTransactions.size} Records",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = PrimaryBlue,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        )
+                    }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+            // Transactions list items
+            items(
+                items = uiState.recentTransactions,
+                key = { it.transactionId }
+            ) { tx ->
+                TransactionItemCard(transaction = tx)
+            }
 
+            // Section Header: Upcoming Modules
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "UPCOMING V1 MODULES",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted,
+                        letterSpacing = 1.sp,
+                        fontSize = 12.sp
+                    )
+                )
+            }
+
+            item {
+                FeaturePreviewCard(
+                    icon = Icons.Default.Payments,
+                    iconTint = PrimaryBlue,
+                    iconBg = PrimaryBlueLight,
+                    title = "UPI Intent Handoff & Outcome Check",
+                    subtitle = "Milestone 4 • Handoff to installed UPI apps with two-step user confirmation."
+                )
+            }
+
+            item {
+                FeaturePreviewCard(
+                    icon = Icons.AutoMirrored.Filled.ReceiptLong,
+                    iconTint = DemoGreen,
+                    iconBg = DemoGreenLight,
+                    title = "Manual Expense Logging",
+                    subtitle = "Milestone 5 • Add and tag cash & digital spending into Room DB."
+                )
+            }
+
+            item {
+                FeaturePreviewCard(
+                    icon = Icons.Default.FileDownload,
+                    iconTint = AccentPurple,
+                    iconBg = AccentPurpleLight,
+                    title = "Statement Import & Deduplication",
+                    subtitle = "Milestone 6 • SAF file picker with cryptographic duplicate detection."
+                )
+            }
+
+            item {
+                FeaturePreviewCard(
+                    icon = Icons.Default.Analytics,
+                    iconTint = AccentTeal,
+                    iconBg = AccentTealLight,
+                    title = "Recipient-Wise Spending Analytics",
+                    subtitle = "Milestone 7 • Daily, weekly, monthly charts of whom you pay most."
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                SecondaryButton(
+                    text = "Exit Demo Mode & Return to Login",
+                    onClick = onExitDemo
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatabaseStatsCard(
+    totalSpendingPaise: Long,
+    totalCount: Int,
+    successCount: Int,
+    pendingCount: Int,
+    failedCount: Int,
+    isResetting: Boolean,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = CardShape,
+        colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+        border = BorderStroke(1.dp, BorderLight)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(PillShape)
+                            .background(DemoGreenLight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Storage,
+                            contentDescription = null,
+                            tint = DemoGreenDark,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Milestone 2 Room Active",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        )
+                        Text(
+                            text = "Local-first SQLite persistence layer",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onReset,
+                    enabled = !isResetting,
+                    shape = PillShape,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = PrimaryBlue
+                    ),
+                    border = BorderStroke(1.dp, PrimaryBlue.copy(alpha = 0.4f)),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 10.dp,
+                        vertical = 4.dp
+                    )
+                ) {
+                    if (isResetting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = PrimaryBlue
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Reset Demo",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Reset",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Total Confirmed Spending Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(CardShape)
+                    .background(BackgroundWhite)
+                    .padding(14.dp)
+            ) {
+                Column {
                     Text(
-                        text = "You are currently running the local Demo Mode prototype. No real bank accounts, UPI PINs, or cloud servers are connected. The architecture follows strict zero-credential invariants.",
-                        style = MaterialTheme.typography.bodyMedium.copy(
+                        text = "TOTAL CONFIRMED SPENDING",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = TextMuted,
+                            letterSpacing = 0.8.sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = PaiseUtils.formatPaiseToCurrency(totalSpendingPaise),
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = PrimaryBlue
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Calculated from $successCount SUCCESS records. Excludes PENDING & FAILED.",
+                        style = MaterialTheme.typography.bodySmall.copy(
                             color = TextSecondary,
-                            lineHeight = 20.sp
+                            fontSize = 11.sp
                         )
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Text(
-                text = "UPCOMING V1 MODULES",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = TextMuted,
-                    letterSpacing = 1.sp,
-                    fontSize = 12.sp
+            // Status Breakdown Chips
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StatusBadge(
+                    label = "$successCount Success",
+                    bgColor = Color(0xFFDCFCE7),
+                    textColor = Color(0xFF166534),
+                    modifier = Modifier.weight(1f)
                 )
+                StatusBadge(
+                    label = "$pendingCount Pending",
+                    bgColor = Color(0xFFFEF3C7),
+                    textColor = Color(0xFF92400E),
+                    modifier = Modifier.weight(1f)
+                )
+                StatusBadge(
+                    label = "$failedCount Failed",
+                    bgColor = Color(0xFFFEE2E2),
+                    textColor = Color(0xFF991B1B),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusBadge(
+    label: String,
+    bgColor: Color,
+    textColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(PillShape)
+            .background(bgColor)
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                color = textColor,
+                fontSize = 11.sp
             )
+        )
+    }
+}
 
-            Spacer(modifier = Modifier.height(12.dp))
+@Composable
+private fun TransactionItemCard(
+    transaction: TransactionEntity,
+    modifier: Modifier = Modifier
+) {
+    val dateFormatter = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+    val formattedDate = dateFormatter.format(Date(transaction.transactionDate))
 
-            // Preview Feature Cards for Upcoming Milestones
-            FeaturePreviewCard(
-                icon = Icons.Default.Payments,
-                iconTint = PrimaryBlue,
-                iconBg = PrimaryBlueLight,
-                title = "UPI Intent Handoff & Outcome Check",
-                subtitle = "Milestone 4 • Handoff to installed UPI apps with two-step user confirmation."
-            )
+    val statusColor = when (transaction.transactionStatus) {
+        TransactionStatus.SUCCESS -> Color(0xFF16A34A)
+        TransactionStatus.PENDING -> Color(0xFFD97706)
+        TransactionStatus.FAILED -> Color(0xFFDC2626)
+        TransactionStatus.CANCELLED -> Color(0xFF6B7280)
+        TransactionStatus.UNKNOWN -> Color(0xFF9CA3AF)
+    }
 
-            Spacer(modifier = Modifier.height(12.dp))
+    val statusIcon = when (transaction.transactionStatus) {
+        TransactionStatus.SUCCESS -> Icons.Default.CheckCircle
+        TransactionStatus.PENDING -> Icons.Default.HourglassTop
+        TransactionStatus.FAILED, TransactionStatus.CANCELLED -> Icons.Default.Close
+        TransactionStatus.UNKNOWN -> Icons.Default.Close
+    }
 
-            FeaturePreviewCard(
-                icon = Icons.Default.ReceiptLong,
-                iconTint = DemoGreen,
-                iconBg = DemoGreenLight,
-                title = "Expense Logging & Paise Precision",
-                subtitle = "Milestone 5 • Cash & digital spending stored as integer paise in Room DB."
-            )
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = CardShape,
+        colors = CardDefaults.cardColors(containerColor = BackgroundWhite),
+        border = BorderStroke(1.dp, BorderLight)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Payment Method Badge
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(PillShape)
+                    .background(
+                        when (transaction.paymentMethod) {
+                            PaymentMethod.UPI -> PrimaryBlueLight
+                            PaymentMethod.CASH -> DemoGreenLight
+                            PaymentMethod.CARD -> AccentPurpleLight
+                            PaymentMethod.BANK_TRANSFER -> AccentTealLight
+                            PaymentMethod.OTHER -> SurfaceLight
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = when (transaction.paymentMethod) {
+                        PaymentMethod.UPI -> "UPI"
+                        PaymentMethod.CASH -> "Cash"
+                        PaymentMethod.CARD -> "Card"
+                        PaymentMethod.BANK_TRANSFER -> "Bank"
+                        PaymentMethod.OTHER -> "Other"
+                    },
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = when (transaction.paymentMethod) {
+                            PaymentMethod.UPI -> PrimaryBlue
+                            PaymentMethod.CASH -> DemoGreenDark
+                            PaymentMethod.CARD -> AccentPurple
+                            PaymentMethod.BANK_TRANSFER -> AccentTeal
+                            PaymentMethod.OTHER -> TextSecondary
+                        },
+                        fontSize = 11.sp
+                    )
+                )
+            }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-            FeaturePreviewCard(
-                icon = Icons.Default.FileDownload,
-                iconTint = AccentPurple,
-                iconBg = AccentPurpleLight,
-                title = "Statement Import & Deduplication",
-                subtitle = "Milestone 6 • SAF file picker with cryptographic duplicate detection."
-            )
+            // Details
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = transaction.recipientName,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            fontSize = 14.sp
+                        )
+                    )
+                    Icon(
+                        imageVector = statusIcon,
+                        contentDescription = transaction.transactionStatus.name,
+                        tint = statusColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                if (transaction.note.isNotBlank()) {
+                    Text(
+                        text = transaction.note,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        ),
+                        maxLines = 1
+                    )
+                }
 
-            FeaturePreviewCard(
-                icon = Icons.Default.Analytics,
-                iconTint = AccentTeal,
-                iconBg = AccentTealLight,
-                title = "Recipient-Wise Spending Analytics",
-                subtitle = "Milestone 7 • Daily, weekly, monthly charts of whom you pay most."
-            )
+                Spacer(modifier = Modifier.height(2.dp))
 
-            Spacer(modifier = Modifier.height(28.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = transaction.category,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    )
+                    Text(
+                        text = "•",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = BorderLight,
+                            fontSize = 10.sp
+                        )
+                    )
+                    Text(
+                        text = formattedDate,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+            }
 
-            SecondaryButton(
-                text = "Exit Demo Mode & Return to Login",
-                onClick = onExitDemo
-            )
+            Spacer(modifier = Modifier.width(10.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
+            // Amount in Paise formatted
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = PaiseUtils.formatPaiseToCurrency(transaction.amountPaise),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (transaction.transactionStatus == TransactionStatus.SUCCESS) TextPrimary else TextMuted,
+                        fontSize = 15.sp
+                    )
+                )
+                Text(
+                    text = "${transaction.amountPaise} paise",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
+                )
+            }
         }
     }
 }
