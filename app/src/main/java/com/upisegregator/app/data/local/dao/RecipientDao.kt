@@ -24,6 +24,19 @@ interface RecipientDao {
     @Delete
     suspend fun deleteRecipient(recipient: RecipientEntity)
 
+    @Query("SELECT * FROM recipients WHERE userId = :userId ORDER BY recipientName ASC")
+    fun getRecipientsByUserFlow(userId: String): Flow<List<RecipientEntity>>
+
+    @Query("SELECT * FROM recipients WHERE recipientId = :recipientId AND userId = :userId LIMIT 1")
+    suspend fun getRecipientById(recipientId: String, userId: String): RecipientEntity?
+
+    @Query("SELECT COUNT(*) FROM recipients WHERE userId = :userId")
+    suspend fun getRecipientCountByUser(userId: String): Int
+
+    @Query("DELETE FROM recipients WHERE userId = :userId")
+    suspend fun deleteRecipientsByUser(userId: String)
+
+    // Legacy helpers
     @Query("SELECT * FROM recipients ORDER BY recipientName ASC")
     fun getAllRecipientsFlow(): Flow<List<RecipientEntity>>
 

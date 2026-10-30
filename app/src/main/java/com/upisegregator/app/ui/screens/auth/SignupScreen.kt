@@ -2,6 +2,7 @@ package com.upisegregator.app.ui.screens.auth
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,16 +35,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.upisegregator.app.ui.components.AppTextField
 import com.upisegregator.app.ui.components.DemoModeBanner
 import com.upisegregator.app.ui.components.PrimaryButton
 import com.upisegregator.app.ui.theme.BackgroundWhite
+import com.upisegregator.app.ui.theme.PillShape
 import com.upisegregator.app.ui.theme.PrimaryBlue
 import com.upisegregator.app.ui.theme.TextPrimary
 import com.upisegregator.app.ui.theme.TextSecondary
@@ -105,7 +110,29 @@ fun SignupScreen(
                 style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary)
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // General error banner if registration failed
+            if (state.generalMessage != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(PillShape)
+                        .background(Color(0xFFFEE2E2))
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = state.generalMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color(0xFF991B1B),
+                            fontWeight = FontWeight.Medium
+                        ),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
 
             AppTextField(
                 value = state.fullName,

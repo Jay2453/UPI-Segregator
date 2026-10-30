@@ -8,6 +8,7 @@ import androidx.room.PrimaryKey
 /**
  * Core transaction entity storing all financial and metadata fields.
  *
+ * Each record belongs to a specific [userId] (or "demo_user" for Demo Mode).
  * All monetary amounts are stored in [amountPaise] as Long integer paise.
  */
 @Entity(
@@ -21,6 +22,7 @@ import androidx.room.PrimaryKey
         )
     ],
     indices = [
+        Index(value = ["userId"]),
         Index(value = ["recipientId"]),
         Index(value = ["transactionDate"]),
         Index(value = ["transactionStatus"]),
@@ -42,5 +44,6 @@ data class TransactionEntity(
     val transactionSource: TransactionSource,
     val externalReference: String? = null,
     val fingerprint: String? = null,
+    val userId: String = "demo_user",
     val createdAt: Long = System.currentTimeMillis()
 )

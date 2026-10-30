@@ -9,6 +9,11 @@ import com.upisegregator.app.data.repository.RecipientRepository
 import com.upisegregator.app.data.repository.RecipientRepositoryImpl
 import com.upisegregator.app.data.repository.TransactionRepository
 import com.upisegregator.app.data.repository.TransactionRepositoryImpl
+import com.upisegregator.app.data.repository.UserRepository
+import com.upisegregator.app.data.repository.UserRepositoryImpl
+import com.upisegregator.app.data.session.SessionManager
+import com.upisegregator.app.data.session.SessionManagerImpl
+import com.upisegregator.app.data.upi.UpiAppPreferenceManager
 
 /**
  * Dependency injection container for application-level singletons.
@@ -18,7 +23,10 @@ interface AppContainer {
     val transactionRepository: TransactionRepository
     val recipientRepository: RecipientRepository
     val categoryRepository: CategoryRepository
+    val userRepository: UserRepository
+    val sessionManager: SessionManager
     val demoDataManager: DemoDataManager
+    val upiAppPreferenceManager: UpiAppPreferenceManager
 }
 
 class AppContainerImpl(context: Context) : AppContainer {
@@ -38,6 +46,14 @@ class AppContainerImpl(context: Context) : AppContainer {
         CategoryRepositoryImpl(database.categoryDao())
     }
 
+    override val userRepository: UserRepository by lazy {
+        UserRepositoryImpl(database.userDao())
+    }
+
+    override val sessionManager: SessionManager by lazy {
+        SessionManagerImpl(context)
+    }
+
     override val demoDataManager: DemoDataManager by lazy {
         DemoDataManager(
             transactionDao = database.transactionDao(),
@@ -45,4 +61,9 @@ class AppContainerImpl(context: Context) : AppContainer {
             categoryDao = database.categoryDao()
         )
     }
+
+    override val upiAppPreferenceManager: UpiAppPreferenceManager by lazy {
+        UpiAppPreferenceManager(context)
+    }
 }
+

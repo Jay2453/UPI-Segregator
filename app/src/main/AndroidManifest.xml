@@ -3,10 +3,35 @@
 
     <!-- Query installed UPI payment apps on the device (Android 11+ package visibility) -->
     <queries>
+        <!-- Generic UPI payment handlers matching upi://pay and upi:// -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data
+                android:scheme="upi"
+                android:host="pay" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="upi" />
         </intent>
+
+        <!-- Explicit package declarations for top Indian UPI applications -->
+        <!-- Google Pay -->
+        <package android:name="com.google.android.apps.nbu.paisa.user" />
+        <!-- PhonePe -->
+        <package android:name="com.phonepe.app" />
+        <!-- Paytm -->
+        <package android:name="net.one97.paytm" />
+        <!-- BHIM NPCI -->
+        <package android:name="in.org.npci.upiapp" />
+        <!-- Amazon Pay -->
+        <package android:name="in.amazon.mShop.android.shopping" />
+        <!-- WhatsApp Pay -->
+        <package android:name="com.whatsapp" />
+        <!-- CRED -->
+        <package android:name="com.cred.club" />
+        <!-- Navi -->
+        <package android:name="com.naviapps.mobile" />
     </queries>
 
     <application

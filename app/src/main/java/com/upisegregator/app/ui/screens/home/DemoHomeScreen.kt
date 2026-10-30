@@ -83,6 +83,7 @@ import java.util.Locale
 @Composable
 fun DemoHomeScreen(
     onExitDemo: () -> Unit,
+    onViewHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: DemoHomeViewModel = viewModel(factory = DemoHomeViewModel.Factory)
 ) {

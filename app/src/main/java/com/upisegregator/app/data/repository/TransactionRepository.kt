@@ -2,7 +2,6 @@ package com.upisegregator.app.data.repository
 
 import com.upisegregator.app.data.local.dao.TransactionDao
 import com.upisegregator.app.data.local.entity.TransactionEntity
-import com.upisegregator.app.data.local.entity.TransactionSource
 import kotlinx.coroutines.flow.Flow
 
 interface TransactionRepository {
@@ -10,17 +9,15 @@ interface TransactionRepository {
     suspend fun insertTransactions(transactions: List<TransactionEntity>)
     suspend fun updateTransaction(transaction: TransactionEntity)
     suspend fun deleteTransaction(transaction: TransactionEntity)
-    suspend fun deleteTransactionById(transactionId: String)
-    fun getAllTransactionsFlow(): Flow<List<TransactionEntity>>
-    suspend fun getTransactionById(transactionId: String): TransactionEntity?
-    fun getTransactionsBySourceFlow(source: TransactionSource): Flow<List<TransactionEntity>>
-    fun getTransactionsByRecipientFlow(recipientId: String): Flow<List<TransactionEntity>>
-    fun getTransactionsByDateRangeFlow(startDate: Long, endDate: Long): Flow<List<TransactionEntity>>
-    fun getTotalSpendingFlow(): Flow<Long>
-    fun getTotalSpendingBySourceFlow(source: TransactionSource): Flow<Long>
-    fun countTransactionsBySourceFlow(source: TransactionSource): Flow<Int>
-    suspend fun countTransactionsBySource(source: TransactionSource): Int
-    suspend fun deleteTransactionsBySource(source: TransactionSource)
+    suspend fun deleteTransactionById(transactionId: String, userId: String)
+    fun getTransactionsByUserFlow(userId: String): Flow<List<TransactionEntity>>
+    suspend fun getTransactionById(transactionId: String, userId: String): TransactionEntity?
+    fun getTransactionsByRecipientFlow(recipientId: String, userId: String): Flow<List<TransactionEntity>>
+    fun getTransactionsByDateRangeFlow(startDate: Long, endDate: Long, userId: String): Flow<List<TransactionEntity>>
+    fun getTotalSpendingByUserFlow(userId: String): Flow<Long>
+    fun countTransactionsByUserFlow(userId: String): Flow<Int>
+    suspend fun countTransactionsByUser(userId: String): Int
+    suspend fun deleteTransactionsByUser(userId: String)
 }
 
 class TransactionRepositoryImpl(
@@ -43,47 +40,39 @@ class TransactionRepositoryImpl(
         transactionDao.deleteTransaction(transaction)
     }
 
-    override suspend fun deleteTransactionById(transactionId: String) {
-        transactionDao.deleteTransactionById(transactionId)
+    override suspend fun deleteTransactionById(transactionId: String, userId: String) {
+        transactionDao.deleteTransactionById(transactionId, userId)
     }
 
-    override fun getAllTransactionsFlow(): Flow<List<TransactionEntity>> {
-        return transactionDao.getAllTransactionsFlow()
+    override fun getTransactionsByUserFlow(userId: String): Flow<List<TransactionEntity>> {
+        return transactionDao.getTransactionsByUserFlow(userId)
     }
 
-    override suspend fun getTransactionById(transactionId: String): TransactionEntity? {
-        return transactionDao.getTransactionById(transactionId)
+    override suspend fun getTransactionById(transactionId: String, userId: String): TransactionEntity? {
+        return transactionDao.getTransactionById(transactionId, userId)
     }
 
-    override fun getTransactionsBySourceFlow(source: TransactionSource): Flow<List<TransactionEntity>> {
-        return transactionDao.getTransactionsBySourceFlow(source)
+    override fun getTransactionsByRecipientFlow(recipientId: String, userId: String): Flow<List<TransactionEntity>> {
+        return transactionDao.getTransactionsByRecipientFlow(recipientId, userId)
     }
 
-    override fun getTransactionsByRecipientFlow(recipientId: String): Flow<List<TransactionEntity>> {
-        return transactionDao.getTransactionsByRecipientFlow(recipientId)
+    override fun getTransactionsByDateRangeFlow(startDate: Long, endDate: Long, userId: String): Flow<List<TransactionEntity>> {
+        return transactionDao.getTransactionsByDateRangeFlow(startDate, endDate, userId)
     }
 
-    override fun getTransactionsByDateRangeFlow(startDate: Long, endDate: Long): Flow<List<TransactionEntity>> {
-        return transactionDao.getTransactionsByDateRangeFlow(startDate, endDate)
+    override fun getTotalSpendingByUserFlow(userId: String): Flow<Long> {
+        return transactionDao.getTotalSpendingByUserFlow(userId)
     }
 
-    override fun getTotalSpendingFlow(): Flow<Long> {
-        return transactionDao.getTotalSpendingFlow()
+    override fun countTransactionsByUserFlow(userId: String): Flow<Int> {
+        return transactionDao.countTransactionsByUserFlow(userId)
     }
 
-    override fun getTotalSpendingBySourceFlow(source: TransactionSource): Flow<Long> {
-        return transactionDao.getTotalSpendingBySourceFlow(source)
+    override suspend fun countTransactionsByUser(userId: String): Int {
+        return transactionDao.countTransactionsByUser(userId)
     }
 
-    override fun countTransactionsBySourceFlow(source: TransactionSource): Flow<Int> {
-        return transactionDao.countTransactionsBySourceFlow(source)
-    }
-
-    override suspend fun countTransactionsBySource(source: TransactionSource): Int {
-        return transactionDao.countTransactionsBySource(source)
-    }
-
-    override suspend fun deleteTransactionsBySource(source: TransactionSource) {
-        transactionDao.deleteTransactionsBySource(source)
+    override suspend fun deleteTransactionsByUser(userId: String) {
+        transactionDao.deleteTransactionsByUser(userId)
     }
 }

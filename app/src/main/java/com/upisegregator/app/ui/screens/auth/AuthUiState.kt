@@ -7,7 +7,8 @@ data class LoginUiState(
     val passwordError: String? = null,
     val isPasswordVisible: Boolean = false,
     val isLoading: Boolean = false,
-    val generalMessage: String? = null
+    val generalMessage: String? = null,
+    val showForgotPasswordDialog: Boolean = false
 )
 
 data class SignupUiState(

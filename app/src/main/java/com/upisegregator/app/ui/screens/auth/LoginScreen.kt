@@ -16,10 +16,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,6 +66,42 @@ fun LoginScreen(
 ) {
     val state by viewModel.loginState.collectAsState()
     val scrollState = rememberScrollState()
+
+    if (state.showForgotPasswordDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.showForgotPasswordDialog(false) },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = PrimaryBlue,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Local-Only Account Recovery",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = "UPI Segregator runs locally on this device with no remote cloud servers or email delivery backends.\n\nWe cannot send password reset links. Please sign in with the local password chosen during account creation, or sign up with a new local profile.",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary, lineHeight = 20.sp)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.showForgotPasswordDialog(false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = PrimaryBlue)
+                ) {
+                    Text(text = "Understood", fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = BackgroundWhite,
+            shape = MaterialTheme.shapes.medium
+        )
+    }
 
     Column(
         modifier = modifier
@@ -115,7 +154,9 @@ fun LoginScreen(
 
         // Demo Mode Quick Entry Card
         DemoEntryCard(
-            onEnterDemo = onNavigateToDemoHome
+            onEnterDemo = {
+                viewModel.enterDemoMode(onSuccess = onNavigateToDemoHome)
+            }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -145,6 +186,28 @@ fun LoginScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+
+        // General feedback message banner (e.g. error)
+        if (state.generalMessage != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(PillShape)
+                    .background(Color(0xFFFEE2E2))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = state.generalMessage ?: "",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFF991B1B),
+                        fontWeight = FontWeight.Medium
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // Login Form Fields
         AppTextField(
@@ -200,7 +263,28 @@ fun LoginScreen(
             )
         )
 
-        Spacer(modifier = Modifier.height(22.dp))
+        // Forgot password row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(
+                onClick = { viewModel.showForgotPasswordDialog(true) },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Text(
+                    text = "Forgot Password?",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = PrimaryBlue,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Primary Blue Login Button
         PrimaryButton(

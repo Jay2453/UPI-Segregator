@@ -9,9 +9,10 @@ interface RecipientRepository {
     suspend fun insertRecipients(recipients: List<RecipientEntity>)
     suspend fun updateRecipient(recipient: RecipientEntity)
     suspend fun deleteRecipient(recipient: RecipientEntity)
-    fun getAllRecipientsFlow(): Flow<List<RecipientEntity>>
-    suspend fun getRecipientById(recipientId: String): RecipientEntity?
-    suspend fun getRecipientCount(): Int
+    fun getRecipientsByUserFlow(userId: String): Flow<List<RecipientEntity>>
+    suspend fun getRecipientById(recipientId: String, userId: String): RecipientEntity?
+    suspend fun getRecipientCountByUser(userId: String): Int
+    suspend fun deleteRecipientsByUser(userId: String)
 }
 
 class RecipientRepositoryImpl(
@@ -34,15 +35,19 @@ class RecipientRepositoryImpl(
         recipientDao.deleteRecipient(recipient)
     }
 
-    override fun getAllRecipientsFlow(): Flow<List<RecipientEntity>> {
-        return recipientDao.getAllRecipientsFlow()
+    override fun getRecipientsByUserFlow(userId: String): Flow<List<RecipientEntity>> {
+        return recipientDao.getRecipientsByUserFlow(userId)
     }
 
-    override suspend fun getRecipientById(recipientId: String): RecipientEntity? {
-        return recipientDao.getRecipientById(recipientId)
+    override suspend fun getRecipientById(recipientId: String, userId: String): RecipientEntity? {
+        return recipientDao.getRecipientById(recipientId, userId)
     }
 
-    override suspend fun getRecipientCount(): Int {
-        return recipientDao.getRecipientCount()
+    override suspend fun getRecipientCountByUser(userId: String): Int {
+        return recipientDao.getRecipientCountByUser(userId)
+    }
+
+    override suspend fun deleteRecipientsByUser(userId: String) {
+        recipientDao.deleteRecipientsByUser(userId)
     }
 }
