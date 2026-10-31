@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -94,12 +95,15 @@ fun PaymentReviewScreen(
     val upiLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        val effectiveTxnId = launchedTxnId.ifBlank {
+            viewModel.activeTransactionId?.ifBlank { null } ?: transactionId
+        }
         viewModel.processUpiResult(
             resultCode = result.resultCode,
             data = result.data,
-            transactionId = launchedTxnId
+            transactionId = effectiveTxnId
         )
-        onPaymentLaunched(launchedTxnId)
+        onPaymentLaunched(effectiveTxnId)
     }
 
     Scaffold(
@@ -232,6 +236,15 @@ fun PaymentReviewScreen(
                         label = "Amount",
                         value = PaiseUtils.formatPaiseToCurrency(state.amountPaise)
                     )
+
+                    if (!state.merchantCategoryName.isNullOrBlank()) {
+                        HorizontalDivider(color = BorderLight, modifier = Modifier.padding(vertical = 10.dp))
+                        ReviewRow(
+                            icon = Icons.Default.Category,
+                            label = "Category",
+                            value = state.merchantCategoryName!!
+                        )
+                    }
 
                     if (state.note.isNotBlank()) {
                         HorizontalDivider(color = BorderLight, modifier = Modifier.padding(vertical = 10.dp))

@@ -12,6 +12,7 @@ interface TransactionRepository {
     suspend fun deleteTransactionById(transactionId: String, userId: String)
     fun getTransactionsByUserFlow(userId: String): Flow<List<TransactionEntity>>
     suspend fun getTransactionById(transactionId: String, userId: String): TransactionEntity?
+    suspend fun getTransactionByIdOnly(transactionId: String): TransactionEntity?
     fun getTransactionsByRecipientFlow(recipientId: String, userId: String): Flow<List<TransactionEntity>>
     fun getTransactionsByDateRangeFlow(startDate: Long, endDate: Long, userId: String): Flow<List<TransactionEntity>>
     fun getTotalSpendingByUserFlow(userId: String): Flow<Long>
@@ -50,6 +51,10 @@ class TransactionRepositoryImpl(
 
     override suspend fun getTransactionById(transactionId: String, userId: String): TransactionEntity? {
         return transactionDao.getTransactionById(transactionId, userId)
+    }
+
+    override suspend fun getTransactionByIdOnly(transactionId: String): TransactionEntity? {
+        return transactionDao.getTransactionByIdOnly(transactionId)
     }
 
     override fun getTransactionsByRecipientFlow(recipientId: String, userId: String): Flow<List<TransactionEntity>> {

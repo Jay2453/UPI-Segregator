@@ -36,6 +36,10 @@ class UpiTransactionLifecycleTest {
             val tx = transactions[id]
             return if (tx != null && tx.userId == userId) tx else null
         }
+
+        fun getByIdOnly(id: String): TransactionEntity? {
+            return transactions[id]
+        }
     }
 
     @Test
@@ -190,6 +194,39 @@ class UpiTransactionLifecycleTest {
     }
 
     @Test
+    fun `BUG 2 FIX - fallback lookup resolves transaction during session restoration race`() {
+        val storage = FakeTransactionStorage()
+        val txnId = "TXN_PENDING_1001"
+        val realUserId = "user_dinesh_patel"
+
+        // Insert pending transaction for real user
+        val tx = TransactionEntity(
+            transactionId = txnId,
+            amountPaise = 1000L,
+            recipientName = "Tea Vendor",
+            paymentMethod = PaymentMethod.UPI,
+            category = "Food & Dining",
+            transactionDate = System.currentTimeMillis(),
+            transactionStatus = TransactionStatus.PENDING,
+            transactionSource = TransactionSource.UPI_INTENT,
+            userId = realUserId
+        )
+        storage.insert(tx)
+
+        // When returning from UPI app, assume session initially defaulted to "demo_user" due to asynchronous DataStore read
+        val transientUserId = "demo_user"
+        val primaryLookup = storage.getById(txnId, transientUserId)
+        assertNull("Primary lookup with transient userId fails", primaryLookup)
+
+        // Fallback lookup by transactionId resolves the record
+        val fallbackRecord = storage.getByIdOnly(txnId)
+        assertNotNull("Fallback lookup by ID successfully resolves transaction, eliminating 'Transaction not found'", fallbackRecord)
+        assertEquals(txnId, fallbackRecord?.transactionId)
+        assertEquals(realUserId, fallbackRecord?.userId)
+        assertEquals(1000L, fallbackRecord?.amountPaise)
+    }
+
+    @Test
     fun `local verification provider truthfully declares no bank verification`() = runBlocking {
         val provider = LocalPaymentVerificationProvider()
         val result = provider.verifyPayment("tx_123", "RRN_456")
@@ -199,3 +236,4 @@ class UpiTransactionLifecycleTest {
         assertTrue(notSupported.reason.contains("cannot independently verify", ignoreCase = true))
     }
 }
+

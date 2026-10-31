@@ -34,6 +34,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE transactionId = :transactionId AND userId = :userId LIMIT 1")
     suspend fun getTransactionById(transactionId: String, userId: String): TransactionEntity?
 
+    @Query("SELECT * FROM transactions WHERE transactionId = :transactionId LIMIT 1")
+    suspend fun getTransactionByIdOnly(transactionId: String): TransactionEntity?
+
     @Query("SELECT * FROM transactions WHERE recipientId = :recipientId AND userId = :userId ORDER BY transactionDate DESC")
     fun getTransactionsByRecipientFlow(recipientId: String, userId: String): Flow<List<TransactionEntity>>
 

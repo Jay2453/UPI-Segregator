@@ -303,7 +303,7 @@ fun UserHomeScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             PrimaryButton(
-                text = "New UPI Payment →",
+                text = "Pay using UPI (Scan QR) →",
                 onClick = onStartPayment
             )
 

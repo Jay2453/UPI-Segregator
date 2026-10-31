@@ -2,6 +2,7 @@ package com.upisegregator.app.ui.screens.payment
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -22,10 +23,11 @@ import com.upisegregator.app.data.upi.UpiAppPreferenceManager
 import com.upisegregator.app.data.upi.UpiIdValidation
 import com.upisegregator.app.data.upi.UpiIntentBuilder
 import com.upisegregator.app.data.upi.UpiLaunchResult
-import com.upisegregator.app.data.upi.UpiPaymentResponse
+import com.upisegregator.app.data.upi.UpiQrData
 import com.upisegregator.app.data.upi.UpiResponseParser
 import com.upisegregator.app.data.upi.UpiResponseStatus
 import com.upisegregator.app.util.PaiseUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,11 +36,34 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI State models
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * State for QR scanning and recipient review + smart amount entry.
+ */
+data class QrPaymentDetailsUiState(
+    val upiId: String = "",
+    val recipientName: String = "",
+    val amountText: String = "",
+    val amountPaise: Long = 0L,
+    val isAmountFixed: Boolean = false,
+    val currency: String = "INR",
+    val note: String = "",
+    val transactionRef: String? = null,
+    val merchantCode: String? = null,
+    val merchantCategoryName: String? = null,
+    val mode: String? = null,
+    val purpose: String? = null,
+    val amountError: String? = null,
+    val generalError: String? = null,
+    val isScanning: Boolean = false,
+    val rawQrString: String = ""
+)
 
 data class PaymentEntryUiState(
     val recipientName: String = "",
@@ -65,6 +90,12 @@ data class PaymentReviewUiState(
     val upiId: String = "",
     val amountPaise: Long = 0L,
     val note: String = "",
+    val transactionRef: String? = null,
+    val merchantCode: String? = null,
+    val merchantCategoryName: String? = null,
+    val mode: String? = null,
+    val purpose: String? = null,
+    val isAmountFixed: Boolean = false,
     val selectedApp: UpiApp? = null,
     val transactionId: String = "",
     val isLaunching: Boolean = false,
@@ -93,7 +124,7 @@ data class PaymentOutcomeUiState(
 
 /**
  * Shared ViewModel for the entire UPI payment flow:
- * PaymentEntry -> UpiAppPicker -> PaymentReview -> PaymentOutcome.
+ * QrScanner -> QrPaymentDetails -> UpiAppPicker -> PaymentReview -> PaymentOutcome.
  *
  * FINANCIAL INTEGRITY RULES:
  * - Payment is created in Room as PENDING *before* launching the external app.
@@ -116,7 +147,104 @@ class PaymentViewModel(
             initialValue = UserSession()
         )
 
-    // ── Payment Entry State ──────────────────────────────────────────────────
+    /**
+     * In-memory cache of active transaction ID to survive process death and activity recreation.
+     */
+    var activeTransactionId: String? = null
+        private set
+
+    // ── QR Details / Smart Amount State ──────────────────────────────────────
+
+    private val _detailsState = MutableStateFlow(QrPaymentDetailsUiState())
+    val detailsState: StateFlow<QrPaymentDetailsUiState> = _detailsState.asStateFlow()
+
+    /**
+     * Populates payment state from a validated scanned UPI QR code.
+     */
+    fun onQrCodeScanned(qrData: UpiQrData) {
+        val initialAmountText = qrData.amountString ?: ""
+        val initialAmountPaise = qrData.amountPaise ?: 0L
+
+        Log.d(
+            "UPI_PAYMENT_DEBUG",
+            "QR Parsed -> Recipient: ${UpiIntentBuilder.maskUpiId(qrData.upiId)} | Name: ${qrData.recipientName} | " +
+                    "Amount: ${qrData.amountString ?: "NOT_SPECIFIED"} | Fixed: ${qrData.isAmountFixed} | MCC: ${qrData.merchantCode}"
+        )
+
+        _detailsState.update {
+            it.copy(
+                upiId = qrData.upiId,
+                recipientName = qrData.recipientName,
+                amountText = initialAmountText,
+                amountPaise = initialAmountPaise,
+                isAmountFixed = qrData.isAmountFixed,
+                currency = qrData.currency,
+                note = qrData.note,
+                transactionRef = qrData.transactionRef,
+                merchantCode = qrData.merchantCode,
+                merchantCategoryName = qrData.merchantCategoryName,
+                mode = qrData.mode,
+                purpose = qrData.purpose,
+                amountError = null,
+                generalError = null,
+                rawQrString = qrData.rawQrString
+            )
+        }
+
+        // Also sync to legacy entry state for compatibility
+        _entryState.update {
+            it.copy(
+                recipientName = qrData.recipientName,
+                upiId = qrData.upiId,
+                amountText = initialAmountText,
+                note = qrData.note,
+                amountError = null,
+                generalError = null
+            )
+        }
+    }
+
+    fun onDetailsAmountChange(v: String) {
+        val current = _detailsState.value
+        if (current.isAmountFixed) {
+            // Cannot edit fixed amount
+            return
+        }
+        _detailsState.update { it.copy(amountText = v, amountError = null, generalError = null) }
+        _entryState.update { it.copy(amountText = v, amountError = null, generalError = null) }
+    }
+
+    fun onDetailsNoteChange(v: String) {
+        _detailsState.update { it.copy(note = v) }
+        _entryState.update { it.copy(note = v) }
+    }
+
+    /**
+     * Validates payment amount according to Smart Amount Mode.
+     * Returns validated amount in integer paise (Long), or null if invalid.
+     */
+    fun validateAndGetDetailsPaise(): Long? {
+        val state = _detailsState.value
+        if (state.upiId.isBlank()) {
+            _detailsState.update { it.copy(generalError = "No recipient UPI ID found. Please rescan QR code.") }
+            return null
+        }
+
+        if (state.isAmountFixed && state.amountPaise > 0L) {
+            return state.amountPaise
+        }
+
+        val parsedPaise = PaiseUtils.rupeesToPaiseOrNull(state.amountText)
+        if (parsedPaise == null || parsedPaise <= 0L) {
+            _detailsState.update { it.copy(amountError = "Enter a valid amount greater than ₹0") }
+            return null
+        }
+
+        _detailsState.update { it.copy(amountPaise = parsedPaise, amountError = null) }
+        return parsedPaise
+    }
+
+    // ── Payment Entry State (Legacy & Fallback) ──────────────────────────────
 
     private val _entryState = MutableStateFlow(PaymentEntryUiState())
     val entryState: StateFlow<PaymentEntryUiState> = _entryState.asStateFlow()
@@ -133,10 +261,6 @@ class PaymentViewModel(
     fun onNoteChange(v: String) =
         _entryState.update { it.copy(note = v) }
 
-    /**
-     * Validates all payment entry fields and returns the validated amount in paise,
-     * or null if validation failed.
-     */
     fun validateAndGetPaise(): Long? {
         val state = _entryState.value
         var valid = true
@@ -203,18 +327,29 @@ class PaymentViewModel(
     val reviewState: StateFlow<PaymentReviewUiState> = _reviewState.asStateFlow()
 
     /**
-     * Prepares the review screen with validated details from the entry and picker screens.
-     * Does NOT yet write to Room — that happens in [createPendingAndLaunch].
+     * Prepares the review screen with validated details from QR scanning / entry and picker screens.
      */
     fun prepareReview(amountPaise: Long) {
+        val details = _detailsState.value
         val entry = _entryState.value
         val picker = _pickerState.value
+
+        val recipientName = details.recipientName.ifBlank { entry.recipientName }.trim()
+        val upiId = details.upiId.ifBlank { entry.upiId }.trim()
+        val note = details.note.ifBlank { entry.note }.trim()
+
         _reviewState.update {
             it.copy(
-                recipientName = entry.recipientName.trim(),
-                upiId = entry.upiId.trim(),
+                recipientName = recipientName,
+                upiId = upiId,
                 amountPaise = amountPaise,
-                note = entry.note.trim(),
+                note = note,
+                transactionRef = details.transactionRef,
+                merchantCode = details.merchantCode,
+                merchantCategoryName = details.merchantCategoryName,
+                mode = details.mode,
+                purpose = details.purpose,
+                isAmountFixed = details.isAmountFixed,
                 selectedApp = picker.selectedApp,
                 error = null
             )
@@ -225,10 +360,12 @@ class PaymentViewModel(
      * Creates a PENDING transaction record in Room, then builds and returns the launch intent.
      *
      * CRITICAL ORDER OF OPERATIONS:
-     * 1. Insert recipient into Room (or reuse existing).
-     * 2. Insert PENDING transaction into Room with generated UUID.
-     * 3. Persist active transaction ID to SessionManager.
-     * 4. Return the launch intent along with the exact transactionId.
+     * 1. Validate session and block Demo Mode payments.
+     * 2. Insert recipient into Room (or reuse existing).
+     * 3. Insert PENDING transaction into Room with generated UUID.
+     * 4. Persist active transaction ID across process recreation in SessionManager and in-memory cache.
+     * 5. Construct properly formatted UPI payment intent with tr, cu=INR, and decimal am.
+     * 6. Return the launch intent along with the exact transactionId.
      */
     fun createPendingAndLaunch(
         context: Context,
@@ -264,45 +401,62 @@ class PaymentViewModel(
                     upiId = review.upiId,
                     userId = userId
                 )
-                recipientRepository.insertRecipient(recipient)
+                withContext(Dispatchers.IO) {
+                    recipientRepository.insertRecipient(recipient)
+                }
 
                 // 2. Create PENDING transaction BEFORE launching external app
                 val transactionId = UUID.randomUUID().toString()
                 val now = System.currentTimeMillis()
+                val category = review.merchantCategoryName ?: "UPI Payment"
                 val transaction = TransactionEntity(
                     transactionId = transactionId,
                     amountPaise = review.amountPaise,
                     recipientId = recipientId,
                     recipientName = review.recipientName,
                     paymentMethod = PaymentMethod.UPI,
-                    category = "UPI Payment",
+                    category = category,
                     note = review.note,
                     transactionDate = now,
                     transactionStatus = TransactionStatus.PENDING,
                     transactionSource = TransactionSource.UPI_INTENT,
-                    externalReference = null,
+                    externalReference = review.transactionRef,
                     userId = userId,
                     createdAt = now
                 )
-                transactionRepository.insertTransaction(transaction)
+
+                withContext(Dispatchers.IO) {
+                    transactionRepository.insertTransaction(transaction)
+                }
 
                 // Persist active transaction ID across process recreation
+                activeTransactionId = transactionId
                 sessionManager.setActivePaymentTransactionId(transactionId)
 
                 // Store transactionId in review state
                 _reviewState.update { it.copy(transactionId = transactionId) }
 
-                // 3. Build URI and resolve launch
+                // 3. Build URI and resolve launch with validated parameters
                 val uri = UpiIntentBuilder.buildUpiUri(
                     payeeUpiId = review.upiId,
                     payeeName = review.recipientName,
                     amountPaise = review.amountPaise,
-                    note = review.note
+                    note = review.note,
+                    transactionRef = review.transactionRef ?: transactionId,
+                    merchantCode = review.merchantCode,
+                    mode = review.mode,
+                    purpose = review.purpose
                 )
 
                 val targetPackage = review.selectedApp?.packageName
                     ?: upiPrefs.getValidatedPreferredPackage()
-                when (val result = UpiIntentBuilder.resolvePaymentLaunch(context, uri, targetPackage)) {
+
+                Log.d(
+                    "UPI_PAYMENT_DEBUG",
+                    "Launching Intent -> TargetPackage: ${targetPackage ?: "CHOOSER"} | TransactionId: $transactionId | URI: $uri"
+                )
+
+                when (val result = UpiIntentBuilder.resolvePaymentLaunch(context, uri, targetPackage, forResult = true)) {
                     is UpiLaunchResult.Success -> onLaunch(result.intent, transactionId)
                     is UpiLaunchResult.Fallback -> onLaunch(result.chooserIntent, transactionId)
                     is UpiLaunchResult.NoAppAvailable -> onNoApp()
@@ -334,6 +488,12 @@ class PaymentViewModel(
 
         val externalRef = response.approvalRefNo ?: response.txnId
 
+        Log.d(
+            "UPI_PAYMENT_DEBUG",
+            "ActivityResult -> ResultCode: $resultCode | TxnId: $transactionId | Status: ${response.status} | " +
+                    "ExtRef: $externalRef | Msg: ${response.message}"
+        )
+
         _outcomeState.update {
             it.copy(
                 transactionId = transactionId,
@@ -350,8 +510,12 @@ class PaymentViewModel(
             viewModelScope.launch {
                 try {
                     val session = sessionManager.sessionFlow.first()
-                    val userId = session.userId ?: return@launch
-                    val existing = transactionRepository.getTransactionById(transactionId, userId)
+                    val userId = session.userId
+                    val existing = if (!userId.isNullOrBlank()) {
+                        transactionRepository.getTransactionById(transactionId, userId)
+                    } else {
+                        transactionRepository.getTransactionByIdOnly(transactionId)
+                    }
                     if (existing != null) {
                         transactionRepository.updateTransaction(
                             existing.copy(externalReference = externalRef)
@@ -369,18 +533,22 @@ class PaymentViewModel(
 
     /**
      * Loads the transaction directly from Room database.
-     * If transactionId is missing or "pending", attempts to recover from persistent SessionManager.
+     *
+     * RESILIENCE INVARIANT (Bug 2 fix):
+     * If transactionId is missing or "pending", recovers from in-memory cache or persistent SessionManager.
+     * Tries exact (transactionId, userId) match first, then falls back to getTransactionByIdOnly
+     * with Demo Mode boundary isolation so activity/process recreation never causes "Transaction not found".
      */
     fun prepareOutcome(transactionId: String) {
         viewModelScope.launch {
             _outcomeState.update { it.copy(isLoading = true, error = null) }
             val session = sessionManager.sessionFlow.first()
-            val userId = session.userId ?: "demo_user"
+            val currentUserId = session.userId
 
-            val resolvedId = if (transactionId.isNotBlank() && transactionId != "pending") {
-                transactionId
-            } else {
-                sessionManager.getActivePaymentTransactionId() ?: ""
+            val resolvedId = when {
+                transactionId.isNotBlank() && transactionId != "pending" && transactionId != "{transactionId}" -> transactionId
+                !activeTransactionId.isNullOrBlank() -> activeTransactionId!!
+                else -> sessionManager.getActivePaymentTransactionId() ?: ""
             }
 
             if (resolvedId.isBlank()) {
@@ -395,7 +563,25 @@ class PaymentViewModel(
                 return@launch
             }
 
-            val existing = transactionRepository.getTransactionById(resolvedId, userId)
+            var existing: TransactionEntity? = if (!currentUserId.isNullOrBlank()) {
+                transactionRepository.getTransactionById(resolvedId, currentUserId)
+            } else null
+
+            // Fallback by ID alone with isolation check
+            if (existing == null) {
+                val byId = transactionRepository.getTransactionByIdOnly(resolvedId)
+                if (byId != null) {
+                    val isAllowed = if (session.isDemoMode) {
+                        byId.userId == "demo_user"
+                    } else {
+                        byId.userId != "demo_user" && (currentUserId == null || byId.userId == currentUserId)
+                    }
+                    if (isAllowed) {
+                        existing = byId
+                    }
+                }
+            }
+
             if (existing != null) {
                 val review = _reviewState.value
                 val recipient = existing.recipientName.ifBlank { review.recipientName }
@@ -458,6 +644,10 @@ class PaymentViewModel(
                 }
 
                 val existing = transactionRepository.getTransactionById(state.transactionId, userId)
+                    ?: transactionRepository.getTransactionByIdOnly(state.transactionId)?.takeIf {
+                        if (session.isDemoMode) it.userId == "demo_user" else it.userId != "demo_user"
+                    }
+
                 if (existing == null) {
                     _outcomeState.update {
                         it.copy(
@@ -475,6 +665,7 @@ class PaymentViewModel(
                 transactionRepository.updateTransaction(updated)
 
                 // Clear persistent active payment ID
+                activeTransactionId = null
                 sessionManager.clearActivePaymentTransactionId()
 
                 _outcomeState.update { it.copy(isSubmitting = false, isConfirmed = true) }

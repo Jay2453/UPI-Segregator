@@ -10,8 +10,10 @@ sealed class Screen(val route: String) {
     data object DemoHome : Screen("demo_home")
     data object UserHome : Screen("user_home")
 
-    // Milestone 4: UPI Payment Flow
-    data object PaymentEntry : Screen("payment_entry")
+    // UPI Payment Flow (QR Scanner Experience)
+    data object QrScanner : Screen("qr_scanner")
+    data object QrPaymentDetails : Screen("qr_payment_details")
+    data object PaymentEntry : Screen("qr_payment_details")
     data object UpiAppPicker : Screen("upi_app_picker/{transactionId}") {
         fun createRoute(transactionId: String) = "upi_app_picker/$transactionId"
     }

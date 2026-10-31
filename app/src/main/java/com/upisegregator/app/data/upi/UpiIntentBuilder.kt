@@ -71,53 +71,142 @@ object UpiIntentBuilder {
     }
 
     /**
-     * Builds a properly-encoded UPI payment URI from validated inputs.
+     * Masks a UPI ID for safe logging.
+     * Example: rahul@upi -> r***l@upi, 9876543210@paytm -> 98***0@paytm.
+     */
+    fun maskUpiId(upiId: String): String {
+        val trimmed = upiId.trim()
+        val atIndex = trimmed.indexOf('@')
+        if (atIndex <= 1) return "***" + trimmed.substring(atIndex.coerceAtLeast(0))
+        val identifier = trimmed.substring(0, atIndex)
+        val handle = trimmed.substring(atIndex)
+        val maskedIdentifier = if (identifier.length <= 3) {
+            "${identifier.first()}***"
+        } else {
+            "${identifier.take(2)}***${identifier.takeLast(1)}"
+        }
+        return "$maskedIdentifier$handle"
+    }
+
+    /**
+     * Safely logs non-sensitive payment initiation parameters for debugging.
+     * NEVER logs PIN, OTP, credentials, or full account identifiers.
+     */
+    fun logSafePaymentDebug(
+        payeeUpiId: String,
+        amountPaise: Long,
+        amountString: String,
+        uri: Uri,
+        selectedPackage: String? = null
+    ) {
+        val masked = maskUpiId(payeeUpiId)
+        android.util.Log.d(
+            "UPI_PAYMENT_DEBUG",
+            "Payment URI Built -> Recipient: $masked | AmountPaise: $amountPaise | am: $amountString | cu: INR | Uri: $uri | TargetPkg: $selectedPackage"
+        )
+    }
+
+    /**
+     * Builds a properly-encoded UPI payment URI from validated inputs conforming to NPCI specifications.
      *
-     * URI format: upi://pay?pa=UPI_ID&pn=NAME&am=AMOUNT&cu=INR&tn=NOTE
+     * Format: upi://pay?pa=UPI_ID&pn=NAME&mc=MCC&tr=REF&tn=NOTE&am=AMOUNT&cu=INR&mode=MODE
      *
-     * @param payeeUpiId  The recipient's UPI Virtual Payment Address (VPA).
-     * @param payeeName   The recipient's display name.
-     * @param amountPaise Payment amount in integer paise (Long). Will be divided by 100 for INR format.
-     * @param note        An optional payment description / transaction note.
+     * @param payeeUpiId     The recipient's UPI Virtual Payment Address (VPA).
+     * @param payeeName      The recipient's display name.
+     * @param amountPaise    Payment amount in integer paise (Long). Will be formatted as decimal INR (e.g. 1000L -> "10.00").
+     * @param note           An optional payment description / transaction note.
+     * @param transactionRef Unique merchant / app transaction reference (tr).
+     * @param merchantCode   Merchant category code (mc) if available.
+     * @param mode           Payment initiation mode (e.g. "01" for static QR, "02" for dynamic QR).
+     * @param purpose        Payment purpose code if available.
      */
     fun buildUpiUri(
         payeeUpiId: String,
         payeeName: String,
         amountPaise: Long,
-        note: String = ""
+        note: String = "",
+        transactionRef: String? = null,
+        merchantCode: String? = null,
+        mode: String? = null,
+        purpose: String? = null
     ): Uri {
         require(amountPaise > 0L) { "Amount must be positive" }
         val amountString = PaiseUtils.paiseToRupeesString(amountPaise)
 
-        return Uri.Builder()
+        // tr: unique transaction reference (up to 35 alphanumeric characters)
+        val tr = if (!transactionRef.isNullOrBlank()) {
+            transactionRef.trim().filter { it.isLetterOrDigit() }.take(35)
+        } else {
+            "TXN" + java.util.UUID.randomUUID().toString().replace("-", "").uppercase().take(27)
+        }
+
+        val builder = Uri.Builder()
             .scheme("upi")
             .authority("pay")
             .appendQueryParameter("pa", payeeUpiId.trim())
-            .appendQueryParameter("pn", payeeName.trim())
-            .appendQueryParameter("am", amountString)
-            .appendQueryParameter("cu", "INR")
-            .appendQueryParameter("tn", note.trim().take(50)) // Most UPI apps cap note at 50 chars
-            .build()
-    }    /**
+            .appendQueryParameter("pn", payeeName.trim().ifBlank { payeeUpiId.trim() })
+
+        if (!merchantCode.isNullOrBlank()) {
+            builder.appendQueryParameter("mc", merchantCode.trim())
+        }
+
+        builder.appendQueryParameter("tr", tr)
+
+        // CRITICAL: Only append tn if non-blank! Appending empty "tn=" causes Google Pay's strict parser to reject the intent!
+        val cleanNote = note.trim().take(50)
+        if (cleanNote.isNotEmpty()) {
+            builder.appendQueryParameter("tn", cleanNote)
+        }
+
+        builder.appendQueryParameter("am", amountString)
+        builder.appendQueryParameter("cu", "INR")
+
+        if (!mode.isNullOrBlank()) {
+            builder.appendQueryParameter("mode", mode.trim())
+        }
+        if (!purpose.isNullOrBlank()) {
+            builder.appendQueryParameter("purpose", purpose.trim())
+        }
+
+        val uri = builder.build()
+        logSafePaymentDebug(payeeUpiId, amountPaise, amountString, uri)
+        return uri
+    }
+
+    /**
      * Creates an ACTION_VIEW intent for the given UPI URI targeting a specific package.
      * Uses setPackage() for maximum resilience against internal class renaming by UPI apps.
+     *
+     * @param forResult If true, does NOT add FLAG_ACTIVITY_NEW_TASK so that startActivityForResult
+     *                  can properly deliver the result to the caller instead of immediately cancelling.
      */
-    fun buildIntentForPackage(uri: Uri, packageName: String, activityName: String = ""): Intent {
+    fun buildIntentForPackage(
+        uri: Uri,
+        packageName: String,
+        activityName: String = "",
+        forResult: Boolean = true
+    ): Intent {
         return Intent(Intent.ACTION_VIEW, uri).apply {
             setPackage(packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (!forResult) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
         }
     }
 
     /**
      * Creates a chooser intent that lets the user pick any compatible UPI app.
      */
-    fun buildChooserIntent(uri: Uri, title: String = "Pay with UPI"): Intent {
-        val baseIntent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+    fun buildChooserIntent(
+        uri: Uri,
+        title: String = "Pay with UPI",
+        forResult: Boolean = true
+    ): Intent {
+        val baseIntent = Intent(Intent.ACTION_VIEW, uri)
         return Intent.createChooser(baseIntent, title).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (!forResult) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
         }
     }
 
@@ -302,7 +391,8 @@ object UpiIntentBuilder {
     fun resolvePaymentLaunch(
         context: Context,
         uri: Uri,
-        preferredPackage: String?
+        preferredPackage: String?,
+        forResult: Boolean = true
     ): UpiLaunchResult {
         val apps = getInstalledUpiApps(context)
         if (apps.isEmpty()) return UpiLaunchResult.NoAppAvailable
@@ -311,7 +401,7 @@ object UpiIntentBuilder {
         if (!preferredPackage.isNullOrBlank()) {
             val preferred = apps.firstOrNull { it.packageName == preferredPackage }
             if (preferred != null) {
-                val intent = buildIntentForPackage(uri, preferred.packageName, preferred.activityName)
+                val intent = buildIntentForPackage(uri, preferred.packageName, preferred.activityName, forResult = forResult)
                 return UpiLaunchResult.Success(intent)
             }
             // Preferred app is gone -> fall through
@@ -320,11 +410,11 @@ object UpiIntentBuilder {
         // Single app -> direct launch
         if (apps.size == 1) {
             val app = apps.first()
-            val intent = buildIntentForPackage(uri, app.packageName, app.activityName)
+            val intent = buildIntentForPackage(uri, app.packageName, app.activityName, forResult = forResult)
             return UpiLaunchResult.Success(intent)
         }
 
         // Multiple apps -> chooser
-        return UpiLaunchResult.Fallback(buildChooserIntent(uri))
+        return UpiLaunchResult.Fallback(buildChooserIntent(uri, forResult = forResult))
     }
 }

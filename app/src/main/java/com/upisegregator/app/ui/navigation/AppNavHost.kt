@@ -23,6 +23,8 @@ import com.upisegregator.app.ui.screens.payment.PaymentEntryScreen
 import com.upisegregator.app.ui.screens.payment.PaymentOutcomeScreen
 import com.upisegregator.app.ui.screens.payment.PaymentReviewScreen
 import com.upisegregator.app.ui.screens.payment.PaymentViewModel
+import com.upisegregator.app.ui.screens.payment.QrPaymentDetailsScreen
+import com.upisegregator.app.ui.screens.payment.QrScannerScreen
 import com.upisegregator.app.ui.screens.payment.TransactionHistoryScreen
 import com.upisegregator.app.ui.screens.payment.UpiAppPickerScreen
 
@@ -113,7 +115,7 @@ fun AppNavHost(
                     }
                 },
                 onStartPayment = {
-                    navController.navigate(Screen.PaymentEntry.route)
+                    navController.navigate(Screen.QrScanner.route)
                 },
                 onViewHistory = {
                     navController.navigate(Screen.TransactionHistory.route)
@@ -121,10 +123,20 @@ fun AppNavHost(
             )
         }
 
-        // ── Milestone 4: UPI Payment Flow ─────────────────────────────────────
+        // ── QR Code UPI Payment Flow ──────────────────────────────────────────
 
-        composable(Screen.PaymentEntry.route) {
-            PaymentEntryScreen(
+        composable(Screen.QrScanner.route) {
+            QrScannerScreen(
+                viewModel = paymentViewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onQrScanned = {
+                    navController.navigate(Screen.QrPaymentDetails.route)
+                }
+            )
+        }
+
+        composable(Screen.QrPaymentDetails.route) {
+            QrPaymentDetailsScreen(
                 viewModel = paymentViewModel,
                 onNavigateBack = { navController.popBackStack() },
                 onContinue = { amountPaise ->
@@ -172,7 +184,7 @@ fun AppNavHost(
                 transactionId = txnId,
                 onDone = {
                     navController.navigate(Screen.UserHome.route) {
-                        popUpTo(Screen.PaymentEntry.route) { inclusive = true }
+                        popUpTo(Screen.UserHome.route) { inclusive = true }
                     }
                 }
             )
