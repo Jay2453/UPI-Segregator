@@ -98,7 +98,7 @@ class UpiPaymentLogicTest {
     // ──────────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `UPI URI string contains all required parameters including tr and omits empty tn`() {
+    fun `UPI URI string contains essential standard parameters and omits empty tn and fake tr`() {
         val uri = UpiUriHelper.buildUpiUriString(
             payeeUpiId = "rahul@upi",
             payeeName = "Rahul",
@@ -110,7 +110,10 @@ class UpiPaymentLogicTest {
         assertTrue("URI must have cu=INR", uri.contains("cu=INR"))
         assertTrue("URI must have am=250.00", uri.contains("am=250.00"))
         assertTrue("URI must have tn=Lunch", uri.contains("tn=Lunch"))
-        assertTrue("URI must have tr=", uri.contains("tr="))
+        assertFalse("URI must NOT generate synthetic tr for standard payments", uri.contains("tr="))
+        assertFalse("URI must NOT contain mc=", uri.contains("mc="))
+        assertFalse("URI must NOT contain mode=", uri.contains("mode="))
+        assertFalse("URI must NOT contain purpose=", uri.contains("purpose="))
     }
 
     @Test
@@ -133,33 +136,217 @@ class UpiPaymentLogicTest {
     }
 
     @Test
-    fun `UPI URI string formats various amounts correctly`() {
-        // 1 rupee (100 paise) -> 1.00
+    fun `UPI URI string formats required test amounts correctly`() {
+        // ₹1 (100 paise) -> 1.00
         val uri1 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 100L)
         assertTrue("₹1 formatted as 1.00", uri1.contains("am=1.00"))
 
-        // 10.50 rupees (1050 paise) -> 10.50
+        // ₹10 (1000 paise) -> 10.00
+        val uri10 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 1000L)
+        assertTrue("₹10 formatted as 10.00", uri10.contains("am=10.00"))
+
+        // ₹10.50 (1050 paise) -> 10.50
         val uri1050 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 1050L)
         assertTrue("₹10.50 formatted as 10.50", uri1050.contains("am=10.50"))
 
-        // 100 rupees (10000 paise) -> 100.00
+        // ₹100 (10000 paise) -> 1000.00
         val uri100 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 10000L)
         assertTrue("₹100 formatted as 100.00", uri100.contains("am=100.00"))
 
-        // 250 rupees (25000 paise) -> 250.00
+        // ₹250 (25000 paise) -> 250.00
         val uri250 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 25000L)
         assertTrue("₹250 formatted as 250.00", uri250.contains("am=250.00"))
 
-        // 1,000 rupees (100000 paise) -> 1000.00
+        // ₹1,000 (100000 paise) -> 1000.00
         val uri1000 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 100000L)
         assertTrue("₹1,000 formatted as 1000.00", uri1000.contains("am=1000.00"))
     }
 
     @Test
-    fun `UPI URI preserves custom transaction reference tr`() {
+    fun `UPI URI preserves custom transaction reference tr when provided`() {
         val customTr = "ORDER123456789"
         val uri = UpiUriHelper.buildUpiUriString("x@upi", "Name", 1000L, transactionRef = customTr)
         assertTrue("URI must contain custom tr", uri.contains("tr=ORDER123456789"))
+    }
+
+    @Test
+    fun `UPI URI preserves exact recipient UPI ID with special characters`() {
+        val upiId = "store.merchant_01-test@hdfcbank"
+        val uri = UpiIntentBuilder.buildUpiUriString(upiId, "Store", 1000L)
+        val parsed = UpiIntentBuilder.parseUpiUriString(uri)
+        assertEquals(upiId, parsed.pa)
+    }
+
+    @Test
+    fun `UPI URI properly URL encodes spaces and special characters`() {
+        val uri = UpiIntentBuilder.buildUpiUriString(
+            payeeUpiId = "user@upi",
+            payeeName = "Dinesh Patel",
+            amountPaise = 1000L,
+            note = "Dinner & Drinks"
+        )
+        // Space should be encoded as %20
+        assertTrue("Name spaces should be %20", uri.contains("pn=Dinesh%20Patel"))
+        assertTrue("Note spaces and ampersand should be encoded", uri.contains("tn=Dinner%20%26%20Drinks"))
+        // Avoid double encoding: must not contain %25
+        assertFalse("Must not double encode", uri.contains("%25"))
+    }
+
+    @Test
+    fun `UPI URI parsing extracts all parameters correctly`() {
+        val uriString = "upi://pay?pa=rahul%40upi&pn=Rahul%20Kumar&am=10.00&cu=INR&tn=Tea&tr=TXN123"
+        val parsed = UpiIntentBuilder.parseUpiUriString(uriString)
+        assertEquals("rahul@upi", parsed.pa)
+        assertEquals("Rahul Kumar", parsed.pn)
+        assertEquals("10.00", parsed.am)
+        assertEquals("INR", parsed.cu)
+        assertEquals("Tea", parsed.tn)
+        assertEquals("TXN123", parsed.tr)
+        assertTrue(parsed.duplicateKeys.isEmpty())
+    }
+
+    @Test
+    fun `UPI URI parsing flags duplicate parameters`() {
+        val uriString = "upi://pay?pa=rahul%40upi&am=10.00&cu=INR&am=20.00"
+        val parsed = UpiIntentBuilder.parseUpiUriString(uriString)
+        assertTrue("Should detect duplicate 'am'", parsed.duplicateKeys.contains("am"))
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Validation Layer Tests
+    // ──────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `validation layer succeeds for valid matching URI`() {
+        val uriString = UpiIntentBuilder.buildUpiUriString(
+            payeeUpiId = "rahul@upi",
+            payeeName = "Rahul",
+            amountPaise = 1000L,
+            note = "Coffee"
+        )
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 1000L,
+            expectedUpiId = "rahul@upi",
+            selectedPackage = "com.google.android.apps.nbu.paisa.user"
+        )
+        assertTrue("Expected valid result but got: $result", result is UpiUriValidationResult.Valid)
+        val valid = result as UpiUriValidationResult.Valid
+        assertEquals(1000L, valid.originalPaise)
+        assertEquals(1000L, valid.parsedPaise)
+        assertEquals("ra***l@upi", valid.recipientMasked)
+        assertTrue(valid.paramNames.contains("am"))
+        assertTrue(valid.paramNames.contains("cu"))
+        assertTrue(valid.paramNames.contains("pa"))
+    }
+
+    @Test
+    fun `validation layer rejects amount mismatch`() {
+        // Built with 10.00 rupees (1000 paise), but expected is 2500 paise
+        val uriString = UpiIntentBuilder.buildUpiUriString("user@upi", "User", 1000L)
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 2500L,
+            expectedUpiId = "user@upi"
+        )
+        assertTrue("Should reject amount mismatch", result is UpiUriValidationResult.Invalid)
+        val reason = (result as UpiUriValidationResult.Invalid).reason
+        assertTrue("Reason should mention mismatch: $reason", reason.contains("mismatch", ignoreCase = true))
+    }
+
+    @Test
+    fun `validation layer rejects recipient mismatch`() {
+        val uriString = UpiIntentBuilder.buildUpiUriString("alice@upi", "Alice", 1000L)
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 1000L,
+            expectedUpiId = "bob@upi"
+        )
+        assertTrue("Should reject recipient mismatch", result is UpiUriValidationResult.Invalid)
+        val reason = (result as UpiUriValidationResult.Invalid).reason
+        assertTrue(reason.contains("mismatch", ignoreCase = true))
+    }
+
+    @Test
+    fun `validation layer rejects non-INR currency`() {
+        val uriString = "upi://pay?pa=user%40upi&pn=User&am=10.00&cu=USD"
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 1000L,
+            expectedUpiId = "user@upi"
+        )
+        assertTrue("Should reject non-INR currency", result is UpiUriValidationResult.Invalid)
+    }
+
+    @Test
+    fun `validation layer rejects non-decimal amount format`() {
+        // "10" instead of decimal "10.00"
+        val uriString = "upi://pay?pa=user%40upi&pn=User&am=10&cu=INR"
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 1000L,
+            expectedUpiId = "user@upi"
+        )
+        assertTrue("Should reject non-decimal amount", result is UpiUriValidationResult.Invalid)
+    }
+
+    @Test
+    fun `validation layer rejects empty note tn parameter`() {
+        val uriString = "upi://pay?pa=user%40upi&pn=User&am=10.00&cu=INR&tn="
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 1000L,
+            expectedUpiId = "user@upi"
+        )
+        assertTrue("Should reject empty tn", result is UpiUriValidationResult.Invalid)
+    }
+
+    @Test
+    fun `validation layer rejects duplicate parameters in URI`() {
+        val uriString = "upi://pay?pa=user%40upi&pn=User&am=10.00&cu=INR&am=10.00"
+        val result = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = 1000L,
+            expectedUpiId = "user@upi"
+        )
+        assertTrue("Should reject duplicate parameter", result is UpiUriValidationResult.Invalid)
+        assertTrue((result as UpiUriValidationResult.Invalid).reason.contains("Duplicate", ignoreCase = true))
+    }
+
+    @Test
+    fun `selected package handling - known packages list includes Google Pay and PhonePe`() {
+        val packages = UpiIntentBuilder.KNOWN_UPI_PACKAGES.toMap()
+        assertEquals("Google Pay", packages["com.google.android.apps.nbu.paisa.user"])
+        assertEquals("PhonePe", packages["com.phonepe.app"])
+        assertEquals("Paytm", packages["net.one97.paytm"])
+        assertEquals("BHIM", packages["in.org.npci.upiapp"])
+    }
+
+    @Test
+    fun `selected package handling - target package does not alter amount or recipient`() {
+        val originalPaise = 1000L
+        val originalUpi = "merchant@upi"
+        val uriGPay = UpiIntentBuilder.buildUpiUriString(originalUpi, "Merchant", originalPaise)
+        val uriPhonePe = UpiIntentBuilder.buildUpiUriString(originalUpi, "Merchant", originalPaise)
+
+        // The URI must remain completely invariant regardless of which package is targeted
+        assertEquals(uriGPay, uriPhonePe)
+
+        val gpayValidation = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriGPay,
+            expectedPaise = originalPaise,
+            expectedUpiId = originalUpi,
+            selectedPackage = "com.google.android.apps.nbu.paisa.user"
+        )
+        assertTrue(gpayValidation is UpiUriValidationResult.Valid)
+
+        val phonePeValidation = UpiIntentBuilder.validateUpiUriString(
+            uriString = uriPhonePe,
+            expectedPaise = originalPaise,
+            expectedUpiId = originalUpi,
+            selectedPackage = "com.phonepe.app"
+        )
+        assertTrue(phonePeValidation is UpiUriValidationResult.Valid)
     }
 
     @Test
@@ -344,46 +531,15 @@ object UpiUriHelper {
         payeeName: String,
         amountPaise: Long,
         note: String = "",
-        transactionRef: String? = null,
-        merchantCode: String? = null,
-        mode: String? = null,
-        purpose: String? = null
+        transactionRef: String? = null
     ): String {
-        require(amountPaise > 0L) { "Amount must be positive" }
-        val amount = PaiseUtils.paiseToRupeesString(amountPaise)
-        val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
-        val tr = if (!transactionRef.isNullOrBlank()) {
-            transactionRef.trim().filter { it.isLetterOrDigit() }.take(35)
-        } else {
-            "TXN" + java.util.UUID.randomUUID().toString().replace("-", "").uppercase().take(27)
-        }
-
-        val sb = StringBuilder("upi://pay?")
-        sb.append("pa=").append(enc(payeeUpiId.trim()))
-        sb.append("&pn=").append(enc(payeeName.trim().ifBlank { payeeUpiId.trim() }))
-
-        if (!merchantCode.isNullOrBlank()) {
-            sb.append("&mc=").append(enc(merchantCode.trim()))
-        }
-
-        sb.append("&tr=").append(enc(tr))
-
-        val cleanNote = note.trim().take(50)
-        if (cleanNote.isNotEmpty()) {
-            sb.append("&tn=").append(enc(cleanNote))
-        }
-
-        sb.append("&am=").append(enc(amount))
-        sb.append("&cu=INR")
-
-        if (!mode.isNullOrBlank()) {
-            sb.append("&mode=").append(enc(mode.trim()))
-        }
-        if (!purpose.isNullOrBlank()) {
-            sb.append("&purpose=").append(enc(purpose.trim()))
-        }
-
-        return sb.toString()
+        return UpiIntentBuilder.buildUpiUriString(
+            payeeUpiId = payeeUpiId,
+            payeeName = payeeName,
+            amountPaise = amountPaise,
+            note = note,
+            transactionRef = transactionRef
+        )
     }
 }
 

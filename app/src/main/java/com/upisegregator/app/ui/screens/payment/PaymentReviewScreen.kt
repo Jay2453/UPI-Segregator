@@ -342,13 +342,19 @@ fun PaymentReviewScreen(
                             launchedTxnId = transactionId
                             try {
                                 upiLauncher.launch(intent)
-                            } catch (_: Exception) {
-                                context.startActivity(intent)
-                                onPaymentLaunched(transactionId)
+                            } catch (e: android.content.ActivityNotFoundException) {
+                                try {
+                                    context.startActivity(intent)
+                                    onPaymentLaunched(transactionId)
+                                } catch (_: Exception) {
+                                    viewModel.setReviewError("Selected UPI application could not be opened. Please select another app.")
+                                }
+                            } catch (e: Exception) {
+                                viewModel.setReviewError("Failed to open UPI app: ${e.message ?: "Unknown error"}")
                             }
                         },
                         onNoApp = {
-                            // Handled by review state error
+                            // Error message is set in review state
                         },
                         onError = { /* error is displayed in state */ }
                     )

@@ -72,6 +72,8 @@ fun UserHomeScreen(
     onLogout: () -> Unit,
     onStartPayment: () -> Unit = {},
     onViewHistory: () -> Unit = {},
+    onAddManualExpense: () -> Unit = {},
+    onViewManualExpenses: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: UserHomeViewModel = viewModel(factory = UserHomeViewModel.Factory)
 ) {
@@ -205,7 +207,7 @@ fun UserHomeScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Real User Spending Box
+            // Real User Spending Box (UPI)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = CardShape,
@@ -214,7 +216,7 @@ fun UserHomeScreen(
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Text(
-                        text = "YOUR CONFIRMED SPENDING",
+                        text = "YOUR CONFIRMED UPI SPENDING",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = TextMuted,
@@ -231,7 +233,7 @@ fun UserHomeScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "${uiState.totalCount} private user transactions recorded. Demo data is strictly isolated.",
+                        text = "${uiState.totalCount} private user transactions recorded via UPI. Kept strictly isolated.",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = TextSecondary,
                             fontSize = 11.sp
@@ -240,56 +242,107 @@ fun UserHomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Empty State Notice for Registered User
+            // Manual Expenses Summary Box (Cash & Offline)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = CardShape,
-                colors = CardDefaults.cardColors(containerColor = SurfaceLight),
+                colors = CardDefaults.cardColors(containerColor = BackgroundWhite),
                 border = BorderStroke(1.dp, BorderLight)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(PillShape)
-                            .background(DemoGreenLight),
-                        contentAlignment = Alignment.Center
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = null,
-                            tint = DemoGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Column {
                         Text(
-                            text = "Clean Isolated User Profile",
-                            style = MaterialTheme.typography.titleSmall.copy(
+                            text = "MANUAL EXPENSES (CASH / OFFLINE)",
+                            style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextMuted,
+                                letterSpacing = 0.8.sp
                             )
                         )
-                        Text(
-                            text = "You are currently signed into your private account. Real transactions will be added in Milestones 4-6.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = TextSecondary,
-                                lineHeight = 16.sp
+                        Box(
+                            modifier = Modifier
+                                .clip(PillShape)
+                                .background(DemoGreenLight)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "OFFLINE",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    color = DemoGreen
+                                )
                             )
-                        )
+                        }
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = PaiseUtils.formatPaiseToCurrency(uiState.manualTotalPaise),
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = DemoGreen
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Today",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = TextSecondary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = PaiseUtils.formatPaiseToCurrency(uiState.manualTodayPaise),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "This Month",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = TextSecondary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = PaiseUtils.formatPaiseToCurrency(uiState.manualMonthPaise),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Separate log for cash and out-of-band spending. Not combined with UPI transactions.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── Milestone 4 Quick Actions ──────────────────────────────────────
+            // ── Quick Actions ──────────────────────────────────────────────────
             Text(
                 text = "QUICK ACTIONS",
                 style = MaterialTheme.typography.labelMedium.copy(
@@ -310,9 +363,24 @@ fun UserHomeScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             SecondaryButton(
-                text = "View Transaction History",
+                text = "View UPI Transaction History",
                 onClick = onViewHistory
             )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            PrimaryButton(
+                text = "+ Record Cash / Manual Expense",
+                onClick = onAddManualExpense
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            SecondaryButton(
+                text = "View Manual Expense Log",
+                onClick = onViewManualExpenses
+            )
+
 
             Spacer(modifier = Modifier.height(20.dp))
 

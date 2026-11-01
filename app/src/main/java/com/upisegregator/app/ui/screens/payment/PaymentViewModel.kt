@@ -18,6 +18,7 @@ import com.upisegregator.app.data.repository.RecipientRepository
 import com.upisegregator.app.data.repository.TransactionRepository
 import com.upisegregator.app.data.session.SessionManager
 import com.upisegregator.app.data.session.UserSession
+import com.upisegregator.app.data.upi.PaymentRedirectionResult
 import com.upisegregator.app.data.upi.UpiApp
 import com.upisegregator.app.data.upi.UpiAppPreferenceManager
 import com.upisegregator.app.data.upi.UpiIdValidation
@@ -436,31 +437,47 @@ class PaymentViewModel(
                 // Store transactionId in review state
                 _reviewState.update { it.copy(transactionId = transactionId) }
 
-                // 3. Build URI and resolve launch with validated parameters
-                val uri = UpiIntentBuilder.buildUpiUri(
-                    payeeUpiId = review.upiId,
-                    payeeName = review.recipientName,
-                    amountPaise = review.amountPaise,
-                    note = review.note,
-                    transactionRef = review.transactionRef ?: transactionId,
-                    merchantCode = review.merchantCode,
-                    mode = review.mode,
-                    purpose = review.purpose
-                )
-
+                // 3. Central redirection: build validated standard UPI URI and resolve target intent
                 val targetPackage = review.selectedApp?.packageName
                     ?: upiPrefs.getValidatedPreferredPackage()
 
-                Log.d(
-                    "UPI_PAYMENT_DEBUG",
-                    "Launching Intent -> TargetPackage: ${targetPackage ?: "CHOOSER"} | TransactionId: $transactionId | URI: $uri"
+                val redirection = UpiIntentBuilder.buildPaymentRedirection(
+                    context = context,
+                    payeeUpiId = review.upiId,
+                    payeeName = review.recipientName,
+                    amountPaise = review.amountPaise,
+                    selectedPackage = targetPackage,
+                    note = review.note,
+                    transactionRef = review.transactionRef
                 )
 
-                when (val result = UpiIntentBuilder.resolvePaymentLaunch(context, uri, targetPackage, forResult = true)) {
-                    is UpiLaunchResult.Success -> onLaunch(result.intent, transactionId)
-                    is UpiLaunchResult.Fallback -> onLaunch(result.chooserIntent, transactionId)
-                    is UpiLaunchResult.NoAppAvailable -> onNoApp()
-                    is UpiLaunchResult.Error -> onError(result.message)
+                when (redirection) {
+                    is PaymentRedirectionResult.Success -> {
+                        Log.d(
+                            "UPI_PAYMENT_DEBUG",
+                            "Launching Intent -> TargetPackage: ${targetPackage ?: "CHOOSER"} | TransactionId: $transactionId | URI: ${redirection.uri}"
+                        )
+                        onLaunch(redirection.intent, transactionId)
+                    }
+                    is PaymentRedirectionResult.AppUnavailable -> {
+                        val msg = "Selected UPI app ($targetPackage) is no longer available on this device."
+                        _reviewState.update { it.copy(isLaunching = false, error = msg) }
+                        onNoApp()
+                    }
+                    is PaymentRedirectionResult.NoAppAvailable -> {
+                        val msg = "No compatible UPI app found on this device."
+                        _reviewState.update { it.copy(isLaunching = false, error = msg) }
+                        onNoApp()
+                    }
+                    is PaymentRedirectionResult.ValidationFailed -> {
+                        val msg = "Payment validation failed: ${redirection.reason}"
+                        _reviewState.update { it.copy(isLaunching = false, error = msg) }
+                        onError(msg)
+                    }
+                    is PaymentRedirectionResult.Error -> {
+                        _reviewState.update { it.copy(isLaunching = false, error = redirection.message) }
+                        onError(redirection.message)
+                    }
                 }
 
                 _reviewState.update { it.copy(isLaunching = false) }
@@ -469,6 +486,13 @@ class PaymentViewModel(
                 _reviewState.update { it.copy(isLaunching = false, error = "Payment setup failed: ${e.message}") }
             }
         }
+    }
+
+    /**
+     * Sets an error message on the review screen and clears the launching spinner.
+     */
+    fun setReviewError(message: String) {
+        _reviewState.update { it.copy(isLaunching = false, error = message) }
     }
 
     /**

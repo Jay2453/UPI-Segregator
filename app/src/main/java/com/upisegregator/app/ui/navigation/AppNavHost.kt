@@ -14,11 +14,15 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import com.upisegregator.app.ui.screens.auth.AuthViewModel
 import com.upisegregator.app.ui.screens.auth.LoginScreen
 import com.upisegregator.app.ui.screens.auth.SignupScreen
 import com.upisegregator.app.ui.screens.home.DemoHomeScreen
 import com.upisegregator.app.ui.screens.home.UserHomeScreen
+import com.upisegregator.app.ui.screens.manualexpense.AddManualExpenseScreen
+import com.upisegregator.app.ui.screens.manualexpense.ManualExpenseHistoryScreen
 import com.upisegregator.app.ui.screens.payment.PaymentEntryScreen
 import com.upisegregator.app.ui.screens.payment.PaymentOutcomeScreen
 import com.upisegregator.app.ui.screens.payment.PaymentReviewScreen
@@ -119,6 +123,12 @@ fun AppNavHost(
                 },
                 onViewHistory = {
                     navController.navigate(Screen.TransactionHistory.route)
+                },
+                onAddManualExpense = {
+                    navController.navigate(Screen.AddManualExpense.createRoute())
+                },
+                onViewManualExpenses = {
+                    navController.navigate(Screen.ManualExpenseHistory.route)
                 }
             )
         }
@@ -196,5 +206,37 @@ fun AppNavHost(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
+
+        // ── Manual Expenses ────────────────────────────────────────────────────
+        composable(
+            route = Screen.AddManualExpense.route,
+            arguments = listOf(
+                navArgument("expenseId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            )
+        ) { backStackEntry ->
+            val expenseId = backStackEntry.arguments?.getString("expenseId")
+            AddManualExpenseScreen(
+                expenseId = expenseId,
+                onNavigateBack = { navController.popBackStack() },
+                onExpenseSaved = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.ManualExpenseHistory.route) {
+            ManualExpenseHistoryScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onAddExpense = {
+                    navController.navigate(Screen.AddManualExpense.createRoute())
+                },
+                onEditExpense = { expenseId ->
+                    navController.navigate(Screen.AddManualExpense.createRoute(expenseId))
+                }
+            )
+        }
     }
 }
+

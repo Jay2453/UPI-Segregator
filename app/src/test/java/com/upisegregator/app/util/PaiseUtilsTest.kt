@@ -69,6 +69,47 @@ class PaiseUtilsTest {
     }
 
     @Test
+    fun requiredAmounts_conversionAndFormatting_areExact() {
+        // ₹1 = 100 paise -> "1.00"
+        assertEquals(100L, PaiseUtils.rupeesToPaise("1"))
+        assertEquals(100L, PaiseUtils.rupeesToPaise("1.00"))
+        assertEquals("1.00", PaiseUtils.paiseToRupeesString(100L))
+        assertEquals("₹1.00", PaiseUtils.formatPaiseToCurrency(100L))
+
+        // ₹10 = 1000 paise -> "10.00"
+        assertEquals(1000L, PaiseUtils.rupeesToPaise("10"))
+        assertEquals(1000L, PaiseUtils.rupeesToPaise("10.00"))
+        assertEquals("10.00", PaiseUtils.paiseToRupeesString(1000L))
+        assertEquals("₹10.00", PaiseUtils.formatPaiseToCurrency(1000L))
+
+        // ₹10.50 = 1050 paise -> "10.50"
+        assertEquals(1050L, PaiseUtils.rupeesToPaise("10.50"))
+        assertEquals("10.50", PaiseUtils.paiseToRupeesString(1050L))
+        assertEquals("₹10.50", PaiseUtils.formatPaiseToCurrency(1050L))
+
+        // ₹100 = 10000 paise -> "100.00"
+        assertEquals(10000L, PaiseUtils.rupeesToPaise("100"))
+        assertEquals(10000L, PaiseUtils.rupeesToPaise("100.00"))
+        assertEquals("100.00", PaiseUtils.paiseToRupeesString(10000L))
+        assertEquals("₹100.00", PaiseUtils.formatPaiseToCurrency(10000L))
+
+        // ₹250 = 25000 paise -> "250.00"
+        assertEquals(25000L, PaiseUtils.rupeesToPaise("250"))
+        assertEquals(25000L, PaiseUtils.rupeesToPaise("250.00"))
+        assertEquals("250.00", PaiseUtils.paiseToRupeesString(25000L))
+        assertEquals("₹250.00", PaiseUtils.formatPaiseToCurrency(25000L))
+
+        // ₹1,000 = 100000 paise -> "1000.00"
+        assertEquals(100000L, PaiseUtils.rupeesToPaise("1000"))
+        assertEquals(100000L, PaiseUtils.rupeesToPaise("1000.00"))
+        assertEquals(100000L, PaiseUtils.rupeesToPaise("1,000"))
+        assertEquals(100000L, PaiseUtils.rupeesToPaise("1,000.00"))
+        assertEquals(100000L, PaiseUtils.rupeesToPaise("₹1,000.00"))
+        assertEquals("1000.00", PaiseUtils.paiseToRupeesString(100000L))
+        assertEquals("₹1,000.00", PaiseUtils.formatPaiseToCurrency(100000L))
+    }
+
+    @Test
     fun isValidAmount_checksStrictlyPositive() {
         assertTrue(PaiseUtils.isValidAmount(1L))
         assertTrue(PaiseUtils.isValidAmount(100000L))

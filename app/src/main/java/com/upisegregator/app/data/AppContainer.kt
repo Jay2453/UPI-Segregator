@@ -5,6 +5,8 @@ import com.upisegregator.app.data.demo.DemoDataManager
 import com.upisegregator.app.data.local.database.AppDatabase
 import com.upisegregator.app.data.repository.CategoryRepository
 import com.upisegregator.app.data.repository.CategoryRepositoryImpl
+import com.upisegregator.app.data.repository.ManualExpenseRepository
+import com.upisegregator.app.data.repository.ManualExpenseRepositoryImpl
 import com.upisegregator.app.data.repository.RecipientRepository
 import com.upisegregator.app.data.repository.RecipientRepositoryImpl
 import com.upisegregator.app.data.repository.TransactionRepository
@@ -24,6 +26,7 @@ interface AppContainer {
     val recipientRepository: RecipientRepository
     val categoryRepository: CategoryRepository
     val userRepository: UserRepository
+    val manualExpenseRepository: ManualExpenseRepository
     val sessionManager: SessionManager
     val demoDataManager: DemoDataManager
     val upiAppPreferenceManager: UpiAppPreferenceManager
@@ -40,6 +43,10 @@ class AppContainerImpl(context: Context) : AppContainer {
 
     override val recipientRepository: RecipientRepository by lazy {
         RecipientRepositoryImpl(database.recipientDao())
+    }
+
+    override val manualExpenseRepository: ManualExpenseRepository by lazy {
+        ManualExpenseRepositoryImpl(database.manualExpenseDao())
     }
 
     override val categoryRepository: CategoryRepository by lazy {

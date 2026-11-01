@@ -24,4 +24,12 @@ sealed class Screen(val route: String) {
         fun createRoute(transactionId: String) = "payment_outcome/$transactionId"
     }
     data object TransactionHistory : Screen("transaction_history")
+
+    // Manual Expense Flow
+    data object AddManualExpense : Screen("add_manual_expense?expenseId={expenseId}") {
+        fun createRoute(expenseId: String? = null): String =
+            if (expenseId != null) "add_manual_expense?expenseId=$expenseId" else "add_manual_expense"
+    }
+    data object ManualExpenseHistory : Screen("manual_expense_history")
 }
+

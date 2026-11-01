@@ -8,6 +8,10 @@ import android.net.Uri
 import android.os.Build
 import com.upisegregator.app.util.PaiseUtils
 
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+
 /**
  * Data class representing a UPI-capable application discovered on the device.
  */
@@ -36,13 +40,53 @@ sealed class UpiLaunchResult {
 }
 
 /**
+ * Result of validating a generated UPI payment URI against expected financial parameters.
+ */
+sealed class UpiUriValidationResult {
+    data class Valid(
+        val uriString: String,
+        val originalPaise: Long,
+        val parsedPaise: Long,
+        val recipientMasked: String,
+        val paramNames: List<String>
+    ) : UpiUriValidationResult()
+
+    data class Invalid(val reason: String) : UpiUriValidationResult()
+}
+
+/**
+ * Result of preparing a complete UPI payment redirection.
+ */
+sealed class PaymentRedirectionResult {
+    data class Success(val intent: Intent, val uri: Uri) : PaymentRedirectionResult()
+    data class ValidationFailed(val reason: String) : PaymentRedirectionResult()
+    data class AppUnavailable(val packageName: String) : PaymentRedirectionResult()
+    data object NoAppAvailable : PaymentRedirectionResult()
+    data class Error(val message: String) : PaymentRedirectionResult()
+}
+
+/**
+ * Structured query parameters extracted from a parsed UPI URI string.
+ */
+data class ParsedUpiParams(
+    val pa: String?,
+    val pn: String?,
+    val am: String?,
+    val cu: String?,
+    val tn: String?,
+    val tr: String?,
+    val allParamNames: List<String>,
+    val duplicateKeys: Set<String>
+)
+
+/**
  * Builds and validates UPI payment intents.
  *
  * SECURITY RULES (never break these):
  * - Never include a UPI PIN, OTP, or banking password.
  * - Never attempt to directly process a transaction.
  * - All amounts are formatted from integer paise — never Float or Double.
- * - All URI parameters are properly encoded via Uri.Builder.
+ * - All URI parameters are properly encoded.
  */
 object UpiIntentBuilder {
 
@@ -62,7 +106,6 @@ object UpiIntentBuilder {
         if (handle.isBlank()) return UpiIdValidation.Invalid("The part after '@' cannot be empty (e.g. upi, ybl, paytm)")
         if (handle.contains(".")) return UpiIdValidation.Invalid("UPI handle should not contain a dot (e.g. use '@upi' not '@upi.com')")
         if (identifier.length > 256 || handle.length > 256) return UpiIdValidation.Invalid("UPI ID is too long")
-        // Basic character whitelist: alphanumeric, dot, hyphen, underscore in identifier
         val identifierRegex = Regex("^[a-zA-Z0-9._\\-]+$")
         if (!identifierRegex.matches(identifier)) return UpiIdValidation.Invalid("UPI ID contains invalid characters")
         val handleRegex = Regex("^[a-zA-Z0-9]+$")
@@ -89,6 +132,264 @@ object UpiIntentBuilder {
     }
 
     /**
+     * Builds a pure, minimal, standard-compliant UPI payment URI string.
+     *
+     * Essential standard UPI parameters generated:
+     * - pa: Recipient UPI ID (exact, trimmed, URL-encoded)
+     * - pn: Recipient name (trimmed, fallback to UPI ID, URL-encoded)
+     * - am: Amount in decimal rupees (e.g. 1000L paise -> "10.00")
+     * - cu: Currency code (always "INR")
+     * - tn: Optional note (appended only if non-blank, max 50 chars, URL-encoded)
+     * - tr: Optional transaction reference (appended only if explicitly provided, alphanumeric, max 35 chars)
+     *
+     * STRICT OMISSIONS:
+     * - Does NOT append empty "tn=" parameters.
+     * - Does NOT append unnecessary "mc" parameters.
+     * - Does NOT append unnecessary "mode" parameters.
+     * - Does NOT append unnecessary "purpose" parameters.
+     * - Does NOT append duplicate parameters.
+     * - Does NOT generate synthetic/fake "tr" parameters for P2P payments.
+     */
+    fun buildUpiUriString(
+        payeeUpiId: String,
+        payeeName: String,
+        amountPaise: Long,
+        note: String = "",
+        transactionRef: String? = null
+    ): String {
+        require(amountPaise > 0L) { "Amount must be strictly positive" }
+        val trimmedUpiId = payeeUpiId.trim()
+        val validation = validateUpiId(trimmedUpiId)
+        require(validation is UpiIdValidation.Valid) {
+            (validation as UpiIdValidation.Invalid).reason
+        }
+
+        val amountString = PaiseUtils.paiseToRupeesString(amountPaise)
+        val name = payeeName.trim().ifBlank { trimmedUpiId }
+
+        val encodeParam = { s: String ->
+            URLEncoder.encode(s, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        }
+
+        val sb = StringBuilder("upi://pay?")
+        sb.append("pa=").append(encodeParam(trimmedUpiId))
+        sb.append("&pn=").append(encodeParam(name))
+        sb.append("&am=").append(amountString)
+        sb.append("&cu=INR")
+
+        val cleanNote = note.trim().take(50)
+        if (cleanNote.isNotEmpty()) {
+            sb.append("&tn=").append(encodeParam(cleanNote))
+        }
+
+        if (!transactionRef.isNullOrBlank()) {
+            val cleanTr = transactionRef.trim().filter { it.isLetterOrDigit() }.take(35)
+            if (cleanTr.isNotEmpty()) {
+                sb.append("&tr=").append(encodeParam(cleanTr))
+            }
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Builds a standard android.net.Uri using [buildUpiUriString].
+     */
+    fun buildUpiUri(
+        payeeUpiId: String,
+        payeeName: String,
+        amountPaise: Long,
+        note: String = "",
+        transactionRef: String? = null
+    ): Uri {
+        val uriString = buildUpiUriString(
+            payeeUpiId = payeeUpiId,
+            payeeName = payeeName,
+            amountPaise = amountPaise,
+            note = note,
+            transactionRef = transactionRef
+        )
+        return Uri.parse(uriString)
+    }
+
+    /**
+     * Pure-Kotlin parser for UPI URI strings.
+     * Extracts query parameters and flags any duplicate keys.
+     */
+    fun parseUpiUriString(uriString: String): ParsedUpiParams {
+        val trimmed = uriString.trim()
+        val schemeSplit = trimmed.split(":", limit = 2)
+        val afterScheme = if (schemeSplit.size == 2) schemeSplit[1] else trimmed
+        val queryStart = afterScheme.indexOf('?')
+        if (queryStart == -1) {
+            return ParsedUpiParams(null, null, null, null, null, null, emptyList(), emptySet())
+        }
+        val queryString = afterScheme.substring(queryStart + 1)
+        val pairs = queryString.split("&")
+
+        val paramNames = mutableListOf<String>()
+        val seenKeys = mutableSetOf<String>()
+        val duplicates = mutableSetOf<String>()
+        val map = mutableMapOf<String, String>()
+
+        for (pair in pairs) {
+            if (pair.isBlank()) continue
+            val parts = pair.split("=", limit = 2)
+            val rawKey = parts[0].trim().lowercase()
+            val rawVal = if (parts.size > 1) parts[1].trim() else ""
+            paramNames.add(rawKey)
+            if (!seenKeys.add(rawKey)) {
+                duplicates.add(rawKey)
+            }
+            val decoded = try {
+                URLDecoder.decode(rawVal, StandardCharsets.UTF_8.name())
+            } catch (_: Exception) {
+                rawVal
+            }
+            map[rawKey] = decoded
+        }
+
+        return ParsedUpiParams(
+            pa = map["pa"],
+            pn = map["pn"],
+            am = map["am"],
+            cu = map["cu"],
+            tn = map["tn"],
+            tr = map["tr"],
+            allParamNames = paramNames,
+            duplicateKeys = duplicates
+        )
+    }
+
+    /**
+     * VALIDATION LAYER:
+     * Validates a generated UPI URI before launching any external payment app.
+     *
+     * 1. Parses the URI string.
+     * 2. Verifies recipient UPI ID matches expected and is valid.
+     * 3. Verifies currency is strictly INR.
+     * 4. Parses the amount back into paise using [PaiseUtils.rupeesToPaise].
+     * 5. Compares parsed paise against the original reviewed amount.
+     * 6. Rejects the request if values differ.
+     * 7. Ensures there are no duplicate query parameters.
+     * 8. Emits safe diagnostic logging with masked recipient and no sensitive data.
+     */
+    fun validateUpiUriString(
+        uriString: String,
+        expectedPaise: Long,
+        expectedUpiId: String,
+        selectedPackage: String? = null
+    ): UpiUriValidationResult {
+        val trimmedUri = uriString.trim()
+        if (!trimmedUri.startsWith("upi://pay?") && !trimmedUri.startsWith("upi:pay?")) {
+            return UpiUriValidationResult.Invalid("Invalid UPI URI format: must start with upi://pay?")
+        }
+
+        val parsed = parseUpiUriString(trimmedUri)
+
+        // 1. Check for duplicate parameters
+        if (parsed.duplicateKeys.isNotEmpty()) {
+            return UpiUriValidationResult.Invalid("Duplicate parameter(s) found in UPI URI: ${parsed.duplicateKeys.joinToString()}")
+        }
+
+        // 2. Verify recipient UPI ID
+        val pa = parsed.pa
+        if (pa.isNullOrBlank()) {
+            return UpiUriValidationResult.Invalid("Missing payee UPI ID (pa)")
+        }
+        if (!pa.equals(expectedUpiId.trim(), ignoreCase = true)) {
+            return UpiUriValidationResult.Invalid("Recipient UPI ID mismatch: expected $expectedUpiId, got $pa")
+        }
+        val idValidation = validateUpiId(pa)
+        if (idValidation is UpiIdValidation.Invalid) {
+            return UpiUriValidationResult.Invalid("Invalid recipient UPI ID: ${idValidation.reason}")
+        }
+
+        // 3. Verify currency is INR
+        val cu = parsed.cu
+        if (cu.isNullOrBlank() || !cu.equals("INR", ignoreCase = true)) {
+            return UpiUriValidationResult.Invalid("Invalid currency: expected INR, got $cu")
+        }
+
+        // 4. Verify amount format and parse back to paise
+        val am = parsed.am
+        if (am.isNullOrBlank()) {
+            return UpiUriValidationResult.Invalid("Missing amount (am)")
+        }
+        if (!Regex("^\\d+\\.\\d{2}$").matches(am)) {
+            return UpiUriValidationResult.Invalid("Amount must be formatted as decimal rupees (e.g. 10.00), got: $am")
+        }
+        val parsedPaise = try {
+            PaiseUtils.rupeesToPaise(am)
+        } catch (e: Exception) {
+            return UpiUriValidationResult.Invalid("Failed to parse URI amount '$am' to paise: ${e.message}")
+        }
+
+        if (parsedPaise != expectedPaise) {
+            return UpiUriValidationResult.Invalid(
+                "Amount mismatch: expected $expectedPaise paise, but URI parsed as $parsedPaise paise"
+            )
+        }
+
+        // 5. Ensure no empty tn= parameter
+        if (parsed.allParamNames.contains("tn") && parsed.tn.isNullOrBlank()) {
+            return UpiUriValidationResult.Invalid("Empty note parameter 'tn' should not be present in URI")
+        }
+
+        // 6. Safe diagnostic logging
+        val maskedRecipient = maskUpiId(expectedUpiId)
+        logSafeValidationDiagnostic(
+            originalPaise = expectedPaise,
+            formattedRupees = am,
+            parsedPaise = parsedPaise,
+            selectedPackage = selectedPackage,
+            paramNames = parsed.allParamNames,
+            maskedRecipient = maskedRecipient
+        )
+
+        return UpiUriValidationResult.Valid(
+            uriString = trimmedUri,
+            originalPaise = expectedPaise,
+            parsedPaise = parsedPaise,
+            recipientMasked = maskedRecipient,
+            paramNames = parsed.allParamNames
+        )
+    }
+
+    /**
+     * Validates an android.net.Uri using [validateUpiUriString].
+     */
+    fun validateUpiUri(
+        uri: Uri,
+        expectedPaise: Long,
+        expectedUpiId: String,
+        selectedPackage: String? = null
+    ): UpiUriValidationResult {
+        return validateUpiUriString(uri.toString(), expectedPaise, expectedUpiId, selectedPackage)
+    }
+
+    /**
+     * Safe diagnostic logger that never throws on JVM unit tests and never logs sensitive data.
+     */
+    fun logSafeValidationDiagnostic(
+        originalPaise: Long,
+        formattedRupees: String,
+        parsedPaise: Long,
+        selectedPackage: String?,
+        paramNames: List<String>,
+        maskedRecipient: String
+    ) {
+        val message = "Payment Validation -> OriginalPaise: $originalPaise | FormattedRupees: $formattedRupees | " +
+                "ParsedPaise: $parsedPaise | TargetPkg: ${selectedPackage ?: "CHOOSER"} | " +
+                "Params: $paramNames | Recipient: $maskedRecipient"
+        try {
+            android.util.Log.d("UPI_PAYMENT_DEBUG", message)
+        } catch (_: Throwable) {
+            println("UPI_PAYMENT_DEBUG: $message")
+        }
+    }
+
+    /**
      * Safely logs non-sensitive payment initiation parameters for debugging.
      * NEVER logs PIN, OTP, credentials, or full account identifiers.
      */
@@ -100,77 +401,86 @@ object UpiIntentBuilder {
         selectedPackage: String? = null
     ) {
         val masked = maskUpiId(payeeUpiId)
-        android.util.Log.d(
-            "UPI_PAYMENT_DEBUG",
-            "Payment URI Built -> Recipient: $masked | AmountPaise: $amountPaise | am: $amountString | cu: INR | Uri: $uri | TargetPkg: $selectedPackage"
-        )
+        val message = "Payment URI Built -> Recipient: $masked | AmountPaise: $amountPaise | am: $amountString | cu: INR | Uri: $uri | TargetPkg: $selectedPackage"
+        try {
+            android.util.Log.d("UPI_PAYMENT_DEBUG", message)
+        } catch (_: Throwable) {
+            println("UPI_PAYMENT_DEBUG: $message")
+        }
     }
 
     /**
-     * Builds a properly-encoded UPI payment URI from validated inputs conforming to NPCI specifications.
+     * CENTRAL REDIRECTION FUNCTION:
+     * One clear redirection function that accepts:
+     * - Recipient UPI ID
+     * - Recipient name
+     * - Amount in paise
+     * - Selected UPI application package
+     * (and optional note and transactionRef)
      *
-     * Format: upi://pay?pa=UPI_ID&pn=NAME&mc=MCC&tr=REF&tn=NOTE&am=AMOUNT&cu=INR&mode=MODE
-     *
-     * @param payeeUpiId     The recipient's UPI Virtual Payment Address (VPA).
-     * @param payeeName      The recipient's display name.
-     * @param amountPaise    Payment amount in integer paise (Long). Will be formatted as decimal INR (e.g. 1000L -> "10.00").
-     * @param note           An optional payment description / transaction note.
-     * @param transactionRef Unique merchant / app transaction reference (tr).
-     * @param merchantCode   Merchant category code (mc) if available.
-     * @param mode           Payment initiation mode (e.g. "01" for static QR, "02" for dynamic QR).
-     * @param purpose        Payment purpose code if available.
+     * Validates the generated URI before creating the intent.
+     * The selected package determines ONLY which app receives the URI;
+     * it never modifies the amount or recipient.
      */
-    fun buildUpiUri(
+    fun buildPaymentRedirection(
+        context: Context,
         payeeUpiId: String,
         payeeName: String,
         amountPaise: Long,
+        selectedPackage: String?,
         note: String = "",
-        transactionRef: String? = null,
-        merchantCode: String? = null,
-        mode: String? = null,
-        purpose: String? = null
-    ): Uri {
-        require(amountPaise > 0L) { "Amount must be positive" }
-        val amountString = PaiseUtils.paiseToRupeesString(amountPaise)
-
-        // tr: unique transaction reference (up to 35 alphanumeric characters)
-        val tr = if (!transactionRef.isNullOrBlank()) {
-            transactionRef.trim().filter { it.isLetterOrDigit() }.take(35)
-        } else {
-            "TXN" + java.util.UUID.randomUUID().toString().replace("-", "").uppercase().take(27)
+        transactionRef: String? = null
+    ): PaymentRedirectionResult {
+        val uriString = try {
+            buildUpiUriString(
+                payeeUpiId = payeeUpiId,
+                payeeName = payeeName,
+                amountPaise = amountPaise,
+                note = note,
+                transactionRef = transactionRef
+            )
+        } catch (e: Exception) {
+            return PaymentRedirectionResult.ValidationFailed(e.message ?: "Failed to build UPI URI")
         }
 
-        val builder = Uri.Builder()
-            .scheme("upi")
-            .authority("pay")
-            .appendQueryParameter("pa", payeeUpiId.trim())
-            .appendQueryParameter("pn", payeeName.trim().ifBlank { payeeUpiId.trim() })
-
-        if (!merchantCode.isNullOrBlank()) {
-            builder.appendQueryParameter("mc", merchantCode.trim())
+        val validation = validateUpiUriString(
+            uriString = uriString,
+            expectedPaise = amountPaise,
+            expectedUpiId = payeeUpiId,
+            selectedPackage = selectedPackage
+        )
+        if (validation is UpiUriValidationResult.Invalid) {
+            return PaymentRedirectionResult.ValidationFailed(validation.reason)
         }
 
-        builder.appendQueryParameter("tr", tr)
+        val uri = Uri.parse(uriString)
+        val baseIntent = Intent(Intent.ACTION_VIEW, uri)
 
-        // CRITICAL: Only append tn if non-blank! Appending empty "tn=" causes Google Pay's strict parser to reject the intent!
-        val cleanNote = note.trim().take(50)
-        if (cleanNote.isNotEmpty()) {
-            builder.appendQueryParameter("tn", cleanNote)
+        if (!selectedPackage.isNullOrBlank()) {
+            if (!isUpiAppAvailable(context, selectedPackage)) {
+                return PaymentRedirectionResult.AppUnavailable(selectedPackage)
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(selectedPackage)
+            }
+            return PaymentRedirectionResult.Success(intent, uri)
         }
 
-        builder.appendQueryParameter("am", amountString)
-        builder.appendQueryParameter("cu", "INR")
-
-        if (!mode.isNullOrBlank()) {
-            builder.appendQueryParameter("mode", mode.trim())
+        // Chooser fallback if no package selected
+        val apps = getInstalledUpiApps(context)
+        if (apps.isEmpty()) {
+            return PaymentRedirectionResult.NoAppAvailable
         }
-        if (!purpose.isNullOrBlank()) {
-            builder.appendQueryParameter("purpose", purpose.trim())
+        if (apps.size == 1) {
+            val app = apps.first()
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(app.packageName)
+            }
+            return PaymentRedirectionResult.Success(intent, uri)
         }
 
-        val uri = builder.build()
-        logSafePaymentDebug(payeeUpiId, amountPaise, amountString, uri)
-        return uri
+        val chooserIntent = Intent.createChooser(baseIntent, "Pay with UPI")
+        return PaymentRedirectionResult.Success(chooserIntent, uri)
     }
 
     /**

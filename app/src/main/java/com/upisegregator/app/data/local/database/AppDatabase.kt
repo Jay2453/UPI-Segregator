@@ -9,10 +9,12 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.upisegregator.app.data.local.converters.Converters
 import com.upisegregator.app.data.local.dao.CategoryDao
+import com.upisegregator.app.data.local.dao.ManualExpenseDao
 import com.upisegregator.app.data.local.dao.RecipientDao
 import com.upisegregator.app.data.local.dao.TransactionDao
 import com.upisegregator.app.data.local.dao.UserDao
 import com.upisegregator.app.data.local.entity.CategoryEntity
+import com.upisegregator.app.data.local.entity.ManualExpenseEntity
 import com.upisegregator.app.data.local.entity.RecipientEntity
 import com.upisegregator.app.data.local.entity.TransactionEntity
 import com.upisegregator.app.data.local.entity.UserEntity
@@ -22,9 +24,10 @@ import com.upisegregator.app.data.local.entity.UserEntity
         UserEntity::class,
         TransactionEntity::class,
         RecipientEntity::class,
-        CategoryEntity::class
+        CategoryEntity::class,
+        ManualExpenseEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun recipientDao(): RecipientDao
     abstract fun categoryDao(): CategoryDao
+    abstract fun manualExpenseDao(): ManualExpenseDao
 
     companion object {
         private const val DATABASE_NAME = "upi_segregator.db"
@@ -73,6 +77,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from Schema 2 (Milestone 3) to Schema 3 (Milestone 5 - Manual Expense Logging).
+         * - Creates `manual_expenses` table for recording cash and offline spending.
+         * - Creates index on `userId` for user isolation.
+         * - Creates index on `expenseDate` for high-performance date-range calculations.
+         * - Preserves all existing tables and data (transactions, users, recipients, categories).
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `manual_expenses` (
+                        `id` TEXT NOT NULL,
+                        `amountPaise` INTEGER NOT NULL,
+                        `recipientName` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `paymentMethod` TEXT NOT NULL,
+                        `expenseDate` INTEGER NOT NULL,
+                        `userId` TEXT NOT NULL DEFAULT 'demo_user',
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_manual_expenses_userId` ON `manual_expenses` (`userId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_manual_expenses_expenseDate` ON `manual_expenses` (`expenseDate`)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -83,7 +117,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                     .also { INSTANCE = it }

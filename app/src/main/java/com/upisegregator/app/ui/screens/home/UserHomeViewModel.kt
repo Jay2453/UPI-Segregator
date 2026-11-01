@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.upisegregator.app.UpiSegregatorApp
 import com.upisegregator.app.data.local.entity.TransactionEntity
+import com.upisegregator.app.data.repository.ManualExpenseRepository
 import com.upisegregator.app.data.repository.TransactionRepository
 import com.upisegregator.app.data.session.SessionManager
 import com.upisegregator.app.data.session.UserSession
@@ -25,13 +26,17 @@ data class UserHomeUiState(
     val totalSpendingPaise: Long = 0L,
     val totalCount: Int = 0,
     val transactions: List<TransactionEntity> = emptyList(),
+    val manualTodayPaise: Long = 0L,
+    val manualMonthPaise: Long = 0L,
+    val manualTotalPaise: Long = 0L,
     val isLoading: Boolean = false
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class UserHomeViewModel(
     private val sessionManager: SessionManager,
-    private val transactionRepository: TransactionRepository
+    private val transactionRepository: TransactionRepository,
+    private val manualExpenseRepository: ManualExpenseRepository
 ) : ViewModel() {
 
     val sessionState: StateFlow<UserSession> = sessionManager.sessionFlow
@@ -61,16 +66,60 @@ class UserHomeViewModel(
             }
         }
 
+    private val manualTodayFlow: Flow<Long> = sessionManager.sessionFlow
+        .flatMapLatest { session ->
+            val uid = session.userId
+            if (uid != null && session.isLoggedIn) {
+                manualExpenseRepository.getDailySpendingByUserFlow(uid)
+            } else {
+                flowOf(0L)
+            }
+        }
+
+    private val manualMonthFlow: Flow<Long> = sessionManager.sessionFlow
+        .flatMapLatest { session ->
+            val uid = session.userId
+            if (uid != null && session.isLoggedIn) {
+                manualExpenseRepository.getMonthlySpendingByUserFlow(uid)
+            } else {
+                flowOf(0L)
+            }
+        }
+
+    private val manualTotalFlow: Flow<Long> = sessionManager.sessionFlow
+        .flatMapLatest { session ->
+            val uid = session.userId
+            if (uid != null && session.isLoggedIn) {
+                manualExpenseRepository.getTotalSpendingByUserFlow(uid)
+            } else {
+                flowOf(0L)
+            }
+        }
+
     val uiState: StateFlow<UserHomeUiState> = combine(
         sessionState,
         userSpendingFlow,
-        userTransactionsFlow
-    ) { session, spending, transactions ->
+        userTransactionsFlow,
+        manualTodayFlow,
+        manualMonthFlow,
+        manualTotalFlow
+    ) { args: Array<Any> ->
+        val session = args[0] as UserSession
+        val spending = args[1] as Long
+        @Suppress("UNCHECKED_CAST")
+        val transactions = args[2] as List<TransactionEntity>
+        val mToday = args[3] as Long
+        val mMonth = args[4] as Long
+        val mTotal = args[5] as Long
+
         UserHomeUiState(
             session = session,
             totalSpendingPaise = spending,
             totalCount = transactions.size,
-            transactions = transactions
+            transactions = transactions,
+            manualTodayPaise = mToday,
+            manualMonthPaise = mMonth,
+            manualTotalPaise = mTotal
         )
     }.stateIn(
         scope = viewModelScope,
@@ -91,7 +140,8 @@ class UserHomeViewModel(
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as UpiSegregatorApp
                 UserHomeViewModel(
                     sessionManager = app.container.sessionManager,
-                    transactionRepository = app.container.transactionRepository
+                    transactionRepository = app.container.transactionRepository,
+                    manualExpenseRepository = app.container.manualExpenseRepository
                 )
             }
         }
