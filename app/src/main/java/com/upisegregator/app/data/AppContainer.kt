@@ -27,6 +27,7 @@ interface AppContainer {
     val categoryRepository: CategoryRepository
     val userRepository: UserRepository
     val manualExpenseRepository: ManualExpenseRepository
+    val statementImportRepository: com.upisegregator.app.data.importer.StatementImportRepository
     val sessionManager: SessionManager
     val demoDataManager: DemoDataManager
     val upiAppPreferenceManager: UpiAppPreferenceManager
@@ -47,6 +48,10 @@ class AppContainerImpl(context: Context) : AppContainer {
 
     override val manualExpenseRepository: ManualExpenseRepository by lazy {
         ManualExpenseRepositoryImpl(database.manualExpenseDao())
+    }
+
+    override val statementImportRepository: com.upisegregator.app.data.importer.StatementImportRepository by lazy {
+        com.upisegregator.app.data.importer.StatementImportRepositoryImpl(transactionRepository)
     }
 
     override val categoryRepository: CategoryRepository by lazy {

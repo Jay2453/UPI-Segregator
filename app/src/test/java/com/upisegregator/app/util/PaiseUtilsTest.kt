@@ -99,6 +99,12 @@ class PaiseUtilsTest {
         assertEquals("250.00", PaiseUtils.paiseToRupeesString(25000L))
         assertEquals("₹250.00", PaiseUtils.formatPaiseToCurrency(25000L))
 
+        // ₹999 = 99900 paise -> "999.00"
+        assertEquals(99900L, PaiseUtils.rupeesToPaise("999"))
+        assertEquals(99900L, PaiseUtils.rupeesToPaise("999.00"))
+        assertEquals("999.00", PaiseUtils.paiseToRupeesString(99900L))
+        assertEquals("₹999.00", PaiseUtils.formatPaiseToCurrency(99900L))
+
         // ₹1,000 = 100000 paise -> "1000.00"
         assertEquals(100000L, PaiseUtils.rupeesToPaise("1000"))
         assertEquals(100000L, PaiseUtils.rupeesToPaise("1000.00"))

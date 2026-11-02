@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Pending
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +59,8 @@ import com.upisegregator.app.data.local.entity.TransactionStatus
 import com.upisegregator.app.data.repository.TransactionRepository
 import com.upisegregator.app.data.session.SessionManager
 import com.upisegregator.app.data.session.UserSession
+import com.upisegregator.app.ui.theme.AccentPurple
+import com.upisegregator.app.ui.theme.AccentPurpleLight
 import com.upisegregator.app.ui.theme.AccentTeal
 import com.upisegregator.app.ui.theme.AccentTealLight
 import com.upisegregator.app.ui.theme.BackgroundWhite
@@ -68,6 +71,8 @@ import com.upisegregator.app.ui.theme.DemoGreenLight
 import com.upisegregator.app.ui.theme.ErrorRed
 import com.upisegregator.app.ui.theme.ErrorRedLight
 import com.upisegregator.app.ui.theme.PillShape
+import com.upisegregator.app.ui.theme.PrimaryBlue
+import com.upisegregator.app.ui.theme.PrimaryBlueLight
 import com.upisegregator.app.ui.theme.SurfaceLight
 import com.upisegregator.app.ui.theme.TextMuted
 import com.upisegregator.app.ui.theme.TextPrimary
@@ -142,6 +147,7 @@ class TransactionHistoryViewModel(
 @Composable
 fun TransactionHistoryScreen(
     onNavigateBack: () -> Unit,
+    onImportStatement: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: TransactionHistoryViewModel = viewModel(factory = TransactionHistoryViewModel.Factory)
 ) {
@@ -165,6 +171,15 @@ fun TransactionHistoryScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
                             tint = TextPrimary
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onImportStatement) {
+                        Icon(
+                            imageVector = Icons.Default.FileDownload,
+                            contentDescription = "Import Statement",
+                            tint = PrimaryBlue
                         )
                     }
                 },
@@ -359,22 +374,29 @@ private fun TransactionCard(transaction: TransactionEntity) {
                             )
                         )
                     }
-                    if (transaction.transactionSource == TransactionSource.DEMO) {
-                        Box(
-                            modifier = Modifier
-                                .clip(PillShape)
-                                .background(DemoGreenLight)
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "DEMO",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = DemoGreen,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
-                                )
+                    // Source Badge
+                    val (sourceLabel, sourceTint, sourceBg) = when (transaction.transactionSource) {
+                        TransactionSource.CSV_IMPORT -> Triple("CSV IMPORT", AccentPurple, AccentPurpleLight)
+                        TransactionSource.UPI_INTENT -> Triple("UPI", PrimaryBlue, PrimaryBlueLight)
+                        TransactionSource.MANUAL -> Triple("MANUAL", WarningAmber, Color(0xFFFEF3C7))
+                        TransactionSource.DEMO -> Triple("DEMO", DemoGreen, DemoGreenLight)
+                        TransactionSource.PDF_IMPORT -> Triple("PDF IMPORT", AccentTeal, AccentTealLight)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(PillShape)
+                            .background(sourceBg)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = sourceLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = sourceTint,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
                             )
-                        }
+                        )
                     }
                     Text(
                         text = transaction.paymentMethod.name,

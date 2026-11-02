@@ -31,5 +31,8 @@ sealed class Screen(val route: String) {
             if (expenseId != null) "add_manual_expense?expenseId=$expenseId" else "add_manual_expense"
     }
     data object ManualExpenseHistory : Screen("manual_expense_history")
+
+    // Bank Statement Import Flow (Milestone 6)
+    data object StatementImport : Screen("statement_import")
 }
 

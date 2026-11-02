@@ -43,6 +43,18 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE userId = :userId AND transactionDate BETWEEN :startDate AND :endDate ORDER BY transactionDate DESC")
     fun getTransactionsByDateRangeFlow(startDate: Long, endDate: Long, userId: String): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM transactions WHERE externalReference = :externalReference AND userId = :userId LIMIT 1")
+    suspend fun getTransactionByExternalReference(externalReference: String, userId: String): TransactionEntity?
+
+    @Query("SELECT * FROM transactions WHERE fingerprint = :fingerprint AND userId = :userId LIMIT 1")
+    suspend fun getTransactionByFingerprint(fingerprint: String, userId: String): TransactionEntity?
+
+    @Query("SELECT * FROM transactions WHERE userId = :userId AND externalReference IN (:references)")
+    suspend fun getTransactionsByExternalReferences(references: List<String>, userId: String): List<TransactionEntity>
+
+    @Query("SELECT * FROM transactions WHERE userId = :userId AND fingerprint IN (:fingerprints)")
+    suspend fun getTransactionsByFingerprints(fingerprints: List<String>, userId: String): List<TransactionEntity>
+
     /**
      * CRITICAL INVARIANT: Only confirmed SUCCESS transactions count towards spending totals in V1.
      * Filtered strictly by userId to guarantee isolation between Demo Mode and registered users.

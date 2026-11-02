@@ -21,6 +21,7 @@ import com.upisegregator.app.ui.screens.auth.LoginScreen
 import com.upisegregator.app.ui.screens.auth.SignupScreen
 import com.upisegregator.app.ui.screens.home.DemoHomeScreen
 import com.upisegregator.app.ui.screens.home.UserHomeScreen
+import com.upisegregator.app.ui.screens.importer.StatementImportScreen
 import com.upisegregator.app.ui.screens.manualexpense.AddManualExpenseScreen
 import com.upisegregator.app.ui.screens.manualexpense.ManualExpenseHistoryScreen
 import com.upisegregator.app.ui.screens.payment.PaymentEntryScreen
@@ -129,6 +130,9 @@ fun AppNavHost(
                 },
                 onViewManualExpenses = {
                     navController.navigate(Screen.ManualExpenseHistory.route)
+                },
+                onImportStatement = {
+                    navController.navigate(Screen.StatementImport.route)
                 }
             )
         }
@@ -203,7 +207,22 @@ fun AppNavHost(
         // ── Transaction History ────────────────────────────────────────────────
         composable(Screen.TransactionHistory.route) {
             TransactionHistoryScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onImportStatement = {
+                    navController.navigate(Screen.StatementImport.route)
+                }
+            )
+        }
+
+        // ── Bank Statement Import (Milestone 6) ─────────────────────────────────
+        composable(Screen.StatementImport.route) {
+            StatementImportScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onViewHistory = {
+                    navController.navigate(Screen.TransactionHistory.route) {
+                        popUpTo(Screen.StatementImport.route) { inclusive = true }
+                    }
+                }
             )
         }
 

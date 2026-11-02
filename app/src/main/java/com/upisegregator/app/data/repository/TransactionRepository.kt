@@ -19,6 +19,10 @@ interface TransactionRepository {
     fun countTransactionsByUserFlow(userId: String): Flow<Int>
     suspend fun countTransactionsByUser(userId: String): Int
     suspend fun deleteTransactionsByUser(userId: String)
+    suspend fun getTransactionByExternalReference(externalReference: String, userId: String): TransactionEntity?
+    suspend fun getTransactionByFingerprint(fingerprint: String, userId: String): TransactionEntity?
+    suspend fun getTransactionsByExternalReferences(references: List<String>, userId: String): List<TransactionEntity>
+    suspend fun getTransactionsByFingerprints(fingerprints: List<String>, userId: String): List<TransactionEntity>
 }
 
 class TransactionRepositoryImpl(
@@ -79,5 +83,27 @@ class TransactionRepositoryImpl(
 
     override suspend fun deleteTransactionsByUser(userId: String) {
         transactionDao.deleteTransactionsByUser(userId)
+    }
+
+    override suspend fun getTransactionByExternalReference(externalReference: String, userId: String): TransactionEntity? {
+        if (externalReference.isBlank()) return null
+        return transactionDao.getTransactionByExternalReference(externalReference, userId)
+    }
+
+    override suspend fun getTransactionByFingerprint(fingerprint: String, userId: String): TransactionEntity? {
+        if (fingerprint.isBlank()) return null
+        return transactionDao.getTransactionByFingerprint(fingerprint, userId)
+    }
+
+    override suspend fun getTransactionsByExternalReferences(references: List<String>, userId: String): List<TransactionEntity> {
+        val nonBlank = references.filter { it.isNotBlank() }
+        if (nonBlank.isEmpty()) return emptyList()
+        return transactionDao.getTransactionsByExternalReferences(nonBlank, userId)
+    }
+
+    override suspend fun getTransactionsByFingerprints(fingerprints: List<String>, userId: String): List<TransactionEntity> {
+        val nonBlank = fingerprints.filter { it.isNotBlank() }
+        if (nonBlank.isEmpty()) return emptyList()
+        return transactionDao.getTransactionsByFingerprints(nonBlank, userId)
     }
 }

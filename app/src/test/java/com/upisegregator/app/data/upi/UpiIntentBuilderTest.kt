@@ -157,6 +157,10 @@ class UpiPaymentLogicTest {
         val uri250 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 25000L)
         assertTrue("₹250 formatted as 250.00", uri250.contains("am=250.00"))
 
+        // ₹999 (99900 paise) -> 999.00
+        val uri999 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 99900L)
+        assertTrue("₹999 formatted as 999.00", uri999.contains("am=999.00"))
+
         // ₹1,000 (100000 paise) -> 1000.00
         val uri1000 = UpiUriHelper.buildUpiUriString("x@upi", "Name", 100000L)
         assertTrue("₹1,000 formatted as 1000.00", uri1000.contains("am=1000.00"))
@@ -514,6 +518,27 @@ class UpiPaymentLogicTest {
         val result = PaymentValidator.validate("Name", "x@upi", "1499.50")
         assertTrue(result.isValid)
         assertEquals(149950L, result.amountPaise)
+    }
+
+    @Test
+    fun `audit URI encoding of VPA containing at-sign`() {
+        val rawUpiId = "merchant.store@hdfcbank"
+        val manualEncoded = java.net.URLEncoder.encode(rawUpiId, "UTF-8").replace("+", "%20")
+        
+        // Exact encoded string contains %40 for @
+        assertEquals("merchant.store%40hdfcbank", manualEncoded)
+
+        // Built URI string contains the encoded parameter
+        val uriString = UpiIntentBuilder.buildUpiUriString(rawUpiId, "Merchant", 1000L)
+        assertTrue(uriString.contains("pa=merchant.store%40hdfcbank"))
+
+        // When decoded by standard URLDecoder, it safely returns the exact original VPA
+        val decoded = java.net.URLDecoder.decode(manualEncoded, "UTF-8")
+        assertEquals(rawUpiId, decoded)
+
+        // When parsed by UpiIntentBuilder.parseUpiUriString, original VPA is strictly restored
+        val parsed = UpiIntentBuilder.parseUpiUriString(uriString)
+        assertEquals(rawUpiId, parsed.pa)
     }
 }
 

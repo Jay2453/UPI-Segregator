@@ -2,6 +2,7 @@ package com.upisegregator.app.ui.screens.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,6 +75,7 @@ fun UserHomeScreen(
     onViewHistory: () -> Unit = {},
     onAddManualExpense: () -> Unit = {},
     onViewManualExpenses: () -> Unit = {},
+    onImportStatement: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: UserHomeViewModel = viewModel(factory = UserHomeViewModel.Factory)
 ) {
@@ -381,6 +383,12 @@ fun UserHomeScreen(
                 onClick = onViewManualExpenses
             )
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            PrimaryButton(
+                text = "📥 Import Bank Statement (CSV)",
+                onClick = onImportStatement
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -421,7 +429,8 @@ fun UserHomeScreen(
                 iconTint = AccentPurple,
                 iconBg = AccentPurpleLight,
                 title = "Statement Import & Deduplication",
-                subtitle = "Milestone 6 • SAF file picker with cryptographic duplicate detection."
+                subtitle = "Milestone 6 • SAF file picker with cryptographic duplicate detection.",
+                onClick = onImportStatement
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -453,10 +462,13 @@ private fun FeaturePreviewCard(
     iconBg: Color,
     title: String,
     subtitle: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         shape = CardShape,
         colors = CardDefaults.cardColors(containerColor = BackgroundWhite),
         border = BorderStroke(1.dp, BorderLight)
