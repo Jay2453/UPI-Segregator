@@ -37,3 +37,11 @@ enum class TransactionSource {
     PDF_IMPORT,
     DEMO
 }
+
+/**
+ * Direction of financial movement: money leaving (DEBIT) vs entering (CREDIT).
+ */
+enum class TransactionDirection {
+    DEBIT,
+    CREDIT
+}

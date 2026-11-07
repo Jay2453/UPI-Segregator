@@ -2,6 +2,7 @@ package com.upisegregator.app.data.local.converters
 
 import androidx.room.TypeConverter
 import com.upisegregator.app.data.local.entity.PaymentMethod
+import com.upisegregator.app.data.local.entity.TransactionDirection
 import com.upisegregator.app.data.local.entity.TransactionSource
 import com.upisegregator.app.data.local.entity.TransactionStatus
 
@@ -33,4 +34,12 @@ class Converters {
     fun toTransactionSource(value: String?): TransactionSource =
         value?.let { runCatching { TransactionSource.valueOf(it) }.getOrDefault(TransactionSource.MANUAL) }
             ?: TransactionSource.MANUAL
+
+    @TypeConverter
+    fun fromTransactionDirection(value: TransactionDirection?): String? = value?.name
+
+    @TypeConverter
+    fun toTransactionDirection(value: String?): TransactionDirection =
+        value?.let { runCatching { TransactionDirection.valueOf(it) }.getOrDefault(TransactionDirection.DEBIT) }
+            ?: TransactionDirection.DEBIT
 }

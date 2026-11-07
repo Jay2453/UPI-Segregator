@@ -92,7 +92,7 @@ class StatementImportAuditTest {
 
         override fun getTotalSpendingByUserFlow(userId: String): Flow<Long> {
             val sum = databaseTransactions
-                .filter { it.userId == userId && it.transactionStatus == TransactionStatus.SUCCESS }
+                .filter { it.userId == userId && it.transactionStatus == TransactionStatus.SUCCESS && it.direction == TransactionDirection.DEBIT }
                 .sumOf { it.amountPaise }
             return flowOf(sum)
         }
@@ -152,8 +152,9 @@ class StatementImportAuditTest {
 
         // Convert to entity and persist
         val entity = candidate.toEntity(testUser)
-        assertEquals(TransactionStatus.PENDING, entity.transactionStatus)
-        assertTrue(entity.note.startsWith("[CREDIT]"))
+        assertEquals(TransactionStatus.SUCCESS, entity.transactionStatus)
+        assertEquals(TransactionDirection.CREDIT, entity.direction)
+        assertEquals("Salary Credit from Employer", entity.note)
 
         fakeTransactionRepository.insertTransaction(entity)
 

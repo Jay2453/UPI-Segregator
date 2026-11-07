@@ -53,6 +53,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.upisegregator.app.UpiSegregatorApp
+import com.upisegregator.app.data.local.entity.TransactionDirection
 import com.upisegregator.app.data.local.entity.TransactionEntity
 import com.upisegregator.app.data.local.entity.TransactionSource
 import com.upisegregator.app.data.local.entity.TransactionStatus
@@ -374,6 +375,23 @@ private fun TransactionCard(transaction: TransactionEntity) {
                             )
                         )
                     }
+                    if (transaction.direction == TransactionDirection.CREDIT) {
+                        Box(
+                            modifier = Modifier
+                                .clip(PillShape)
+                                .background(AccentTealLight)
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "CREDIT",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = AccentTeal,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                    }
                     // Source Badge
                     val (sourceLabel, sourceTint, sourceBg) = when (transaction.transactionSource) {
                         TransactionSource.CSV_IMPORT -> Triple("CSV IMPORT", AccentPurple, AccentPurpleLight)
@@ -422,13 +440,15 @@ private fun TransactionCard(transaction: TransactionEntity) {
 
             // Amount
             Column(horizontalAlignment = Alignment.End) {
+                val amountPrefix = if (transaction.direction == TransactionDirection.CREDIT) "+ " else ""
                 Text(
-                    text = PaiseUtils.formatPaiseToCurrency(transaction.amountPaise),
+                    text = amountPrefix + PaiseUtils.formatPaiseToCurrency(transaction.amountPaise),
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
-                        color = when (transaction.transactionStatus) {
-                            TransactionStatus.SUCCESS -> DemoGreen
-                            TransactionStatus.FAILED, TransactionStatus.CANCELLED -> TextMuted
+                        color = when {
+                            transaction.direction == TransactionDirection.CREDIT -> DemoGreen
+                            transaction.transactionStatus == TransactionStatus.SUCCESS -> TextPrimary
+                            transaction.transactionStatus == TransactionStatus.FAILED || transaction.transactionStatus == TransactionStatus.CANCELLED -> TextMuted
                             else -> TextPrimary
                         },
                         fontSize = 15.sp

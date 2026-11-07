@@ -2,6 +2,7 @@ package com.upisegregator.app.data.importer
 
 import com.upisegregator.app.data.importer.model.DuplicateStatus
 import com.upisegregator.app.data.local.entity.PaymentMethod
+import com.upisegregator.app.data.local.entity.TransactionDirection
 import com.upisegregator.app.data.local.entity.TransactionEntity
 import com.upisegregator.app.data.local.entity.TransactionSource
 import com.upisegregator.app.data.local.entity.TransactionStatus
@@ -65,7 +66,9 @@ class StatementImportRepositoryTest {
         }
 
         override fun getTotalSpendingByUserFlow(userId: String): Flow<Long> {
-            val sum = databaseTransactions.filter { it.userId == userId && it.transactionStatus == TransactionStatus.SUCCESS }.sumOf { it.amountPaise }
+            val sum = databaseTransactions.filter {
+                it.userId == userId && it.transactionStatus == TransactionStatus.SUCCESS && it.direction == TransactionDirection.DEBIT
+            }.sumOf { it.amountPaise }
             return flowOf(sum)
         }
 

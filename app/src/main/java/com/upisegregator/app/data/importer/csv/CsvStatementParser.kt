@@ -162,14 +162,24 @@ object CsvStatementParser {
             val debitPaise = AmountParser.parseToPaise(row.getOrNull(mapping.debitIndex))
             val creditPaise = AmountParser.parseToPaise(row.getOrNull(mapping.creditIndex))
 
+            val hasDebit = debitPaise != null && debitPaise > 0L
+            val hasCredit = creditPaise != null && creditPaise > 0L
+
             when {
-                debitPaise != null && debitPaise > 0L -> {
+                hasDebit && hasCredit -> {
+                    // Conflicting row: both debit and credit columns contain positive amounts
+                    validationStatus = RowValidationStatus.INVALID
+                    validationError = "Row has conflicting debit and credit amounts"
+                    amountPaise = debitPaise ?: 0L
                     direction = TransactionDirection.DEBIT
-                    amountPaise = debitPaise
                 }
-                creditPaise != null && creditPaise > 0L -> {
+                hasDebit -> {
+                    direction = TransactionDirection.DEBIT
+                    amountPaise = debitPaise!!
+                }
+                hasCredit -> {
                     direction = TransactionDirection.CREDIT
-                    amountPaise = creditPaise
+                    amountPaise = creditPaise!!
                 }
                 else -> {
                     validationStatus = RowValidationStatus.INVALID
@@ -178,31 +188,50 @@ object CsvStatementParser {
             }
         } else if (mapping.hasSingleAmount) {
             val rawAmtStr = row.getOrNull(mapping.amountIndex)?.trim() ?: ""
-            val isNegative = rawAmtStr.startsWith("-") || rawAmtStr.contains("DR", true)
+            val isExplicitDebit = rawAmtStr.startsWith("-") || rawAmtStr.contains("DR", true)
+            val isExplicitCredit = rawAmtStr.startsWith("+") || rawAmtStr.contains("CR", true)
             val parsedPaise = AmountParser.parseToPaise(rawAmtStr)
 
             if (parsedPaise != null && parsedPaise > 0L) {
                 amountPaise = parsedPaise
                 val rawType = if (mapping.typeIndicatorIndex != -1) row.getOrNull(mapping.typeIndicatorIndex)?.trim() else null
 
-                direction = when {
+                val lower = description.lowercase(Locale.US)
+                val hasCreditKeyword = lower.contains("salary") || lower.contains("refund") ||
+                    lower.contains("interest credited") || lower.contains("interest received") ||
+                    lower.contains("dividend") || lower.contains("cashback") || lower.contains("reversal") ||
+                    lower.contains("deposit") || lower.contains("inward")
+
+                val hasDebitKeyword = lower.contains("withdrawal") || lower.contains("pos ") ||
+                    lower.contains("debit") || lower.contains("bill payment") || lower.contains("paid to") ||
+                    lower.contains("recharge") || lower.contains("fee") || lower.contains("charge") ||
+                    lower.contains("tax") || lower.contains("purchase")
+
+                when {
                     rawType != null && (rawType.equals("CR", true) || rawType.contains("CREDIT", true) || rawType.contains("DEP", true)) -> {
-                        TransactionDirection.CREDIT
+                        direction = TransactionDirection.CREDIT
                     }
                     rawType != null && (rawType.equals("DR", true) || rawType.contains("DEBIT", true) || rawType.contains("W/D", true)) -> {
-                        TransactionDirection.DEBIT
+                        direction = TransactionDirection.DEBIT
                     }
-                    isNegative -> {
-                        TransactionDirection.DEBIT
+                    isExplicitCredit -> {
+                        direction = TransactionDirection.CREDIT
+                    }
+                    isExplicitDebit -> {
+                        direction = TransactionDirection.DEBIT
+                    }
+                    hasCreditKeyword && !hasDebitKeyword -> {
+                        direction = TransactionDirection.CREDIT
+                    }
+                    hasDebitKeyword && !hasCreditKeyword -> {
+                        direction = TransactionDirection.DEBIT
                     }
                     else -> {
-                        // Guess from description keywords
-                        val lower = description.lowercase(Locale.US)
-                        if (lower.contains("salary") || lower.contains("refund") || lower.contains("interest credited") || lower.contains("reversal")) {
-                            TransactionDirection.CREDIT
-                        } else {
-                            TransactionDirection.DEBIT
-                        }
+                        // FIX D: When direction cannot be reliably determined, do NOT guess DEBIT!
+                        // Flag row as NEEDS_REVIEW, clear automatic selection, provide clear explanation.
+                        direction = TransactionDirection.DEBIT
+                        validationStatus = RowValidationStatus.NEEDS_REVIEW
+                        validationError = "Transaction direction (Debit/Credit) could not be determined automatically. Requires review."
                     }
                 }
             } else {

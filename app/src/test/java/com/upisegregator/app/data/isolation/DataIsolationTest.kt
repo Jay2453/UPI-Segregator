@@ -2,6 +2,7 @@ package com.upisegregator.app.data.isolation
 
 import com.upisegregator.app.data.demo.DemoDataManager
 import com.upisegregator.app.data.local.entity.PaymentMethod
+import com.upisegregator.app.data.local.entity.TransactionDirection
 import com.upisegregator.app.data.local.entity.TransactionEntity
 import com.upisegregator.app.data.local.entity.TransactionSource
 import com.upisegregator.app.data.local.entity.TransactionStatus
@@ -132,11 +133,11 @@ class DataIsolationTest {
         )
 
         val alphaSpending = transactions
-            .filter { it.userId == "user_alpha" && it.transactionStatus == TransactionStatus.SUCCESS }
+            .filter { it.userId == "user_alpha" && it.transactionStatus == TransactionStatus.SUCCESS && it.direction == TransactionDirection.DEBIT }
             .sumOf { it.amountPaise }
 
         val betaSpending = transactions
-            .filter { it.userId == "user_beta" && it.transactionStatus == TransactionStatus.SUCCESS }
+            .filter { it.userId == "user_beta" && it.transactionStatus == TransactionStatus.SUCCESS && it.direction == TransactionDirection.DEBIT }
             .sumOf { it.amountPaise }
 
         assertEquals(25000L, alphaSpending)

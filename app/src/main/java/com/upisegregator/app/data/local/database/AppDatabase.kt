@@ -27,7 +27,7 @@ import com.upisegregator.app.data.local.entity.UserEntity
         CategoryEntity::class,
         ManualExpenseEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -107,6 +107,31 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from Schema 3 (Milestone 5) to Schema 4 (Milestone 6 - Transaction Direction & Concurrency Safety).
+         * - Adds `direction` column (TEXT, NOT NULL, DEFAULT 'DEBIT') to `transactions`.
+         * - Creates index on `direction`.
+         * - Backfills existing `[CREDIT]` records as CREDIT and SUCCESS, preserving note contents.
+         * - Preserves all other PENDING and DEBIT records untouched.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Add direction column with default 'DEBIT'
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `direction` TEXT NOT NULL DEFAULT 'DEBIT'")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_direction` ON `transactions` (`direction`)")
+
+                // 2. Backfill existing [CREDIT] records as CREDIT and SUCCESS
+                db.execSQL(
+                    """
+                    UPDATE `transactions`
+                    SET `direction` = 'CREDIT',
+                        `transactionStatus` = 'SUCCESS'
+                    WHERE `note` LIKE '[CREDIT]%'
+                    """.trimIndent()
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -117,7 +142,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                     .also { INSTANCE = it }

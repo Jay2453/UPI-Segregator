@@ -1,18 +1,16 @@
 package com.upisegregator.app.data.importer.model
 
 import com.upisegregator.app.data.local.entity.PaymentMethod
+import com.upisegregator.app.data.local.entity.TransactionDirection
 import com.upisegregator.app.data.local.entity.TransactionEntity
 import com.upisegregator.app.data.local.entity.TransactionSource
 import com.upisegregator.app.data.local.entity.TransactionStatus
 import java.util.UUID
 
 /**
- * Direction of financial movement in bank statement rows.
+ * Typealias ensuring complete backwards compatibility across importer and entity models.
  */
-enum class TransactionDirection {
-    DEBIT,
-    CREDIT
-}
+typealias TransactionDirection = com.upisegregator.app.data.local.entity.TransactionDirection
 
 /**
  * Duplicate status determined by the deduplication engine.
@@ -64,20 +62,21 @@ data class ImportableTransaction(
      */
     fun toEntity(userId: String): TransactionEntity {
         return TransactionEntity(
-            transactionId = "csv_${UUID.randomUUID()}",
+            transactionId = "csv_${fingerprint}",
             amountPaise = amountPaise,
             recipientId = null,
             recipientName = recipientName,
             paymentMethod = paymentMethod,
             category = category,
-            note = if (direction == TransactionDirection.CREDIT) "[CREDIT] $description" else description,
+            note = description,
             transactionDate = dateMillis,
-            transactionStatus = if (direction == TransactionDirection.DEBIT) TransactionStatus.SUCCESS else TransactionStatus.PENDING,
+            transactionStatus = TransactionStatus.SUCCESS,
             transactionSource = TransactionSource.CSV_IMPORT,
             externalReference = externalReference?.takeIf { it.isNotBlank() },
             fingerprint = fingerprint,
             userId = userId,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            direction = direction
         )
     }
 }

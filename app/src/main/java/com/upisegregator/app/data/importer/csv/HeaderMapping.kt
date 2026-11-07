@@ -23,7 +23,7 @@ data class HeaderMapping(
     companion object {
 
         private val DATE_HEADERS = listOf(
-            "date", "txndate", "txn date", "transaction date", "value date",
+            "date", "txndate", "txn date", "tran date", "transaction date", "value date",
             "posting date", "trans date", "booking date", "entry date"
         )
 

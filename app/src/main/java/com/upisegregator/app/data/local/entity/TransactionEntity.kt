@@ -27,7 +27,8 @@ import androidx.room.PrimaryKey
         Index(value = ["transactionDate"]),
         Index(value = ["transactionStatus"]),
         Index(value = ["transactionSource"]),
-        Index(value = ["fingerprint"])
+        Index(value = ["fingerprint"]),
+        Index(value = ["direction"])
     ]
 )
 data class TransactionEntity(
@@ -45,5 +46,6 @@ data class TransactionEntity(
     val externalReference: String? = null,
     val fingerprint: String? = null,
     val userId: String = "demo_user",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val direction: TransactionDirection = TransactionDirection.DEBIT
 )

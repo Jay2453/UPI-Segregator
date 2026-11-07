@@ -56,10 +56,11 @@ interface TransactionDao {
     suspend fun getTransactionsByFingerprints(fingerprints: List<String>, userId: String): List<TransactionEntity>
 
     /**
-     * CRITICAL INVARIANT: Only confirmed SUCCESS transactions count towards spending totals in V1.
+     * CRITICAL INVARIANT: Only confirmed SUCCESS DEBIT transactions count towards spending totals.
+     * Credit transactions (income, refunds, deposits) NEVER inflate spending totals.
      * Filtered strictly by userId to guarantee isolation between Demo Mode and registered users.
      */
-    @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM transactions WHERE userId = :userId AND transactionStatus = 'SUCCESS'")
+    @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM transactions WHERE userId = :userId AND transactionStatus = 'SUCCESS' AND direction = 'DEBIT'")
     fun getTotalSpendingByUserFlow(userId: String): Flow<Long>
 
     @Query("SELECT COUNT(*) FROM transactions WHERE userId = :userId")
@@ -81,7 +82,7 @@ interface TransactionDao {
     @Query("SELECT COUNT(*) FROM transactions WHERE transactionSource = :source")
     suspend fun countTransactionsBySource(source: TransactionSource): Int
 
-    @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM transactions WHERE transactionStatus = 'SUCCESS'")
+    @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM transactions WHERE transactionStatus = 'SUCCESS' AND direction = 'DEBIT'")
     fun getTotalSpendingFlow(): Flow<Long>
 
     @Query("DELETE FROM transactions")

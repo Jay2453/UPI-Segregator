@@ -41,8 +41,10 @@ object DateFormats {
         "dd-MMMM-yyyy"
     )
 
+    private val utcTimeZone = TimeZone.getTimeZone("UTC")
+
     private val displayFormat = SimpleDateFormat("dd MMM yyyy", Locale.US).apply {
-        timeZone = TimeZone.getDefault()
+        timeZone = utcTimeZone
     }
 
     /**
@@ -60,6 +62,7 @@ object DateFormats {
         for (pattern in supportedPatterns) {
             try {
                 val parser = SimpleDateFormat(pattern, Locale.US).apply {
+                    timeZone = utcTimeZone
                     isLenient = false
                 }
                 val date = parser.parse(cleaned)
