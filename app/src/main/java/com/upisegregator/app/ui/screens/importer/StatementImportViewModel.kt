@@ -8,12 +8,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.upisegregator.app.UpiSegregatorApp
+import com.upisegregator.app.data.importer.DetectedFileFormat
 import com.upisegregator.app.data.importer.StatementImportRepository
 import com.upisegregator.app.data.importer.model.DuplicateStatus
 import com.upisegregator.app.data.importer.model.ImportableTransaction
 import com.upisegregator.app.data.importer.model.RowValidationStatus
 import com.upisegregator.app.data.importer.model.StatementImportResult
 import com.upisegregator.app.data.importer.model.TransactionDirection
+import com.upisegregator.app.data.importer.pdf.PdfDocumentType
 import com.upisegregator.app.data.session.SessionManager
 import com.upisegregator.app.data.session.UserSession
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +43,12 @@ data class StatementImportUiState(
     val errorMessage: String? = null,
     val candidates: List<ImportableTransaction> = emptyList(),
     val activeFilter: ImportFilterTab = ImportFilterTab.ALL,
-    val importResult: StatementImportResult? = null
+    val importResult: StatementImportResult? = null,
+    val detectedFormat: DetectedFileFormat = DetectedFileFormat.UNKNOWN,
+    val detectedBank: String? = null,
+    val extractionWarnings: List<String> = emptyList(),
+    val requiresPassword: Boolean = false,
+    val pdfDocumentType: PdfDocumentType? = null
 ) {
     val totalDetected: Int get() = candidates.size
     val validCount: Int get() = candidates.count { it.validationStatus == RowValidationStatus.VALID && it.duplicateStatus == DuplicateStatus.NONE }
@@ -63,6 +70,10 @@ class StatementImportViewModel(
     private val statementImportRepository: StatementImportRepository
 ) : ViewModel() {
 
+    private var currentFileBytes: ByteArray? = null
+    private var currentFileName: String? = null
+    private var currentMimeType: String? = null
+
     val sessionState: StateFlow<UserSession> = sessionManager.sessionFlow
         .stateIn(
             scope = viewModelScope,
@@ -81,7 +92,7 @@ class StatementImportViewModel(
     }
 
     /**
-     * Reads and parses a CSV file from the selected [Uri] using [ContentResolver].
+     * Reads and parses a CSV or PDF statement file from the selected [Uri] using [ContentResolver].
      */
     fun onFileSelected(uri: Uri, contentResolver: ContentResolver, fileName: String) {
         _uiState.update {
@@ -90,7 +101,12 @@ class StatementImportViewModel(
                 errorMessage = null,
                 fileName = fileName,
                 candidates = emptyList(),
-                importResult = null
+                importResult = null,
+                requiresPassword = false,
+                detectedFormat = DetectedFileFormat.UNKNOWN,
+                detectedBank = null,
+                extractionWarnings = emptyList(),
+                pdfDocumentType = null
             )
         }
 
@@ -98,37 +114,24 @@ class StatementImportViewModel(
             try {
                 val session = sessionManager.sessionFlow.first()
                 val userId = if (session.isDemoMode) "demo_user" else (session.userId ?: "demo_user")
+                val mimeType = contentResolver.getType(uri)
 
-                val inputStream: InputStream? = contentResolver.openInputStream(uri)
-                if (inputStream == null) {
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes == null || bytes.isEmpty()) {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = "Unable to read the selected file. Please grant file access."
+                            errorMessage = "Unable to read the selected file or file is empty."
                         )
                     }
                     return@launch
                 }
 
-                inputStream.use { stream ->
-                    val result = statementImportRepository.parseAndDetectDuplicates(stream, userId)
-                    if (result.isSuccess) {
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                candidates = result.transactions,
-                                errorMessage = null
-                            )
-                        }
-                    } else {
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                errorMessage = result.errorMessage ?: "Failed to parse bank statement CSV."
-                            )
-                        }
-                    }
-                }
+                currentFileBytes = bytes
+                currentFileName = fileName
+                currentMimeType = mimeType
+
+                processBytes(bytes, fileName, mimeType, userId, password = null)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -136,6 +139,94 @@ class StatementImportViewModel(
                         errorMessage = "Error reading statement: ${e.localizedMessage ?: e.message}"
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Retries unlocking and parsing an encrypted PDF with the user-provided password.
+     * The password is treated ephemerally: never logged or persisted.
+     */
+    fun unlockWithPassword(password: String) {
+        val bytes = currentFileBytes ?: return
+        val fileName = currentFileName ?: "statement.pdf"
+        val mimeType = currentMimeType
+
+        _uiState.update {
+            it.copy(
+                isLoading = true,
+                errorMessage = null,
+                requiresPassword = false
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val session = sessionManager.sessionFlow.first()
+                val userId = if (session.isDemoMode) "demo_user" else (session.userId ?: "demo_user")
+                processBytes(bytes, fileName, mimeType, userId, password = password)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = "Failed to unlock PDF: ${e.localizedMessage ?: e.message}",
+                        requiresPassword = true
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun processBytes(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String?,
+        userId: String,
+        password: String?
+    ) {
+        val result = statementImportRepository.parseFileAndDetectDuplicates(
+            fileBytes = bytes,
+            fileName = fileName,
+            mimeType = mimeType,
+            userId = userId,
+            password = password
+        )
+
+        if (result.requiresPassword) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    errorMessage = result.errorMessage,
+                    requiresPassword = true,
+                    detectedFormat = result.detectedFormat,
+                    detectedBank = result.detectedBank,
+                    pdfDocumentType = result.pdfDocumentType
+                )
+            }
+        } else if (result.isSuccess) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    candidates = result.transactions,
+                    detectedFormat = result.detectedFormat,
+                    detectedBank = result.detectedBank,
+                    extractionWarnings = result.extractionWarnings,
+                    pdfDocumentType = result.pdfDocumentType,
+                    errorMessage = null,
+                    requiresPassword = false
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    errorMessage = result.errorMessage ?: "Failed to parse bank statement.",
+                    detectedFormat = result.detectedFormat,
+                    detectedBank = result.detectedBank,
+                    extractionWarnings = result.extractionWarnings,
+                    pdfDocumentType = result.pdfDocumentType,
+                    requiresPassword = false
+                )
             }
         }
     }
@@ -179,6 +270,9 @@ class StatementImportViewModel(
     }
 
     fun resetState() {
+        currentFileBytes = null
+        currentFileName = null
+        currentMimeType = null
         _uiState.update {
             StatementImportUiState(session = it.session)
         }

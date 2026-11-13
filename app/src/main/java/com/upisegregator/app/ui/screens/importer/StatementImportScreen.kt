@@ -50,19 +50,25 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.upisegregator.app.data.importer.DetectedFileFormat
 import com.upisegregator.app.data.importer.model.DuplicateStatus
 import com.upisegregator.app.data.importer.model.ImportableTransaction
 import com.upisegregator.app.data.importer.model.RowValidationStatus
@@ -197,15 +203,7 @@ fun StatementImportScreen(
                     InitialPickerView(
                         errorMessage = uiState.errorMessage,
                         onPickFileClick = {
-                            filePickerLauncher.launch(
-                                arrayOf(
-                                    "text/csv",
-                                    "text/comma-separated-values",
-                                    "application/csv",
-                                    "text/*",
-                                    "*/*"
-                                )
-                            )
+                            filePickerLauncher.launch(SUPPORTED_STATEMENT_MIME_TYPES)
                         }
                     )
                 }
@@ -219,20 +217,24 @@ fun StatementImportScreen(
                         onDeselectAll = { viewModel.deselectAll() },
                         onFilterSelected = { viewModel.setFilter(it) },
                         onChooseDifferentFile = {
-                            filePickerLauncher.launch(
-                                arrayOf(
-                                    "text/csv",
-                                    "text/comma-separated-values",
-                                    "application/csv",
-                                    "text/*",
-                                    "*/*"
-                                )
-                            )
+                            filePickerLauncher.launch(SUPPORTED_STATEMENT_MIME_TYPES)
                         }
                     )
                 }
             }
         }
+    }
+
+    // Password Prompt Dialog for encrypted PDFs
+    if (uiState.requiresPassword) {
+        PasswordPromptDialog(
+            errorMessage = uiState.errorMessage,
+            onUnlock = { password -> viewModel.unlockWithPassword(password) },
+            onDismiss = {
+                viewModel.clearError()
+                viewModel.resetState()
+            }
+        )
     }
 
     // Success Summary Dialog
@@ -294,7 +296,7 @@ private fun InitialPickerView(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Select CSV Bank Statement",
+                    text = "Select Bank Statement",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
@@ -304,7 +306,7 @@ private fun InitialPickerView(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Pick a downloaded statement file (.csv). Supports exports from HDFC, SBI, ICICI, Axis, and all major Indian banks.",
+                    text = "Pick a downloaded statement file (.pdf or .csv). Automatically detects format and layout for HDFC, SBI, ICICI, Axis, and all major Indian banks.",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = TextSecondary,
                         lineHeight = 18.sp,
@@ -315,7 +317,7 @@ private fun InitialPickerView(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 PrimaryButton(
-                    text = "Choose CSV File",
+                    text = "Choose Statement File (PDF / CSV)",
                     onClick = onPickFileClick
                 )
             }
@@ -435,15 +437,61 @@ private fun ImportPreviewView(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = uiState.fileName ?: "Bank_Statement.csv",
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = uiState.fileName ?: "Bank_Statement",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            val formatTag = when (uiState.detectedFormat) {
+                                DetectedFileFormat.PDF -> "PDF"
+                                DetectedFileFormat.CSV -> "CSV"
+                                else -> null
+                            }
+                            if (formatTag != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(PillShape)
+                                        .background(PrimaryBlueLight)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = formatTag,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = PrimaryBlue,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp
+                                        )
+                                    )
+                                }
+                            }
+                            if (!uiState.detectedBank.isNullOrBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(PillShape)
+                                        .background(AccentTealLight)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = uiState.detectedBank ?: "",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = AccentTeal,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "${uiState.totalDetected} rows parsed • ${uiState.validCount} ready • ${uiState.duplicateCount} duplicates",
@@ -456,6 +504,47 @@ private fun ImportPreviewView(
 
                     TextButton(onClick = onChooseDifferentFile) {
                         Text("Change", color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (uiState.extractionWarnings.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = CardShape,
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+                    border = BorderStroke(1.dp, Color(0xFFFFE082))
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = null,
+                                tint = WarningAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Extraction Notices",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = Color(0xFF795548),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                        uiState.extractionWarnings.forEach { warning ->
+                            Text(
+                                text = "• $warning",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color(0xFF5D4037),
+                                    fontSize = 11.sp
+                                ),
+                                modifier = Modifier.padding(top = 2.dp, start = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -883,4 +972,79 @@ private fun getFileName(contentResolver: android.content.ContentResolver, uri: U
         }
     }
     return name
+}
+
+private val SUPPORTED_STATEMENT_MIME_TYPES = arrayOf(
+    "application/pdf",
+    "text/csv",
+    "text/comma-separated-values",
+    "application/csv",
+    "text/*",
+    "*/*"
+)
+
+@Composable
+private fun PasswordPromptDialog(
+    errorMessage: String?,
+    onUnlock: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = PrimaryBlue,
+                modifier = Modifier.size(28.dp)
+            )
+        },
+        title = {
+            Text(
+                text = "Protected Statement PDF",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "This bank statement PDF is encrypted. Enter your document password to unlock and parse transactions. Passwords are never stored or logged.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, lineHeight = 16.sp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Statement Password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (errorMessage != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodySmall.copy(color = ErrorRed, fontSize = 11.sp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (password.isNotBlank()) onUnlock(password) },
+                enabled = password.isNotBlank()
+            ) {
+                Text("Unlock", color = PrimaryBlue, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        },
+        containerColor = BackgroundWhite,
+        shape = CardShape
+    )
 }

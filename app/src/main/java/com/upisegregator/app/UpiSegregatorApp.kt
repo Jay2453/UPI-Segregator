@@ -1,6 +1,7 @@
 package com.upisegregator.app
 
 import android.app.Application
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.upisegregator.app.data.AppContainer
 import com.upisegregator.app.data.AppContainerImpl
 
@@ -15,6 +16,7 @@ class UpiSegregatorApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        PDFBoxResourceLoader.init(this)
         container = AppContainerImpl(this)
     }
 }

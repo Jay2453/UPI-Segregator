@@ -8,10 +8,14 @@ import com.upisegregator.app.data.importer.model.ImportableTransaction
 import com.upisegregator.app.data.importer.model.RowValidationStatus
 import com.upisegregator.app.data.importer.model.StatementImportResult
 import com.upisegregator.app.data.importer.model.TransactionDirection
+import com.upisegregator.app.data.importer.pdf.PdfStatementExtractor
+import com.upisegregator.app.data.local.entity.TransactionSource
 import com.upisegregator.app.data.repository.TransactionRepository
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.util.Locale
 
 interface StatementImportRepository {
     suspend fun parseAndDetectDuplicates(
@@ -23,6 +27,14 @@ interface StatementImportRepository {
         csvContent: String,
         userId: String
     ): CsvParseResult
+
+    suspend fun parseFileAndDetectDuplicates(
+        fileBytes: ByteArray,
+        fileName: String,
+        mimeType: String?,
+        userId: String,
+        password: String? = null
+    ): StatementParseResult
 
     suspend fun saveImportedTransactions(
         allCandidates: List<ImportableTransaction>,
@@ -58,6 +70,92 @@ class StatementImportRepositoryImpl(
         userId: String
     ): CsvParseResult {
         return parseAndDetectDuplicates(csvContent.byteInputStream(Charsets.UTF_8), userId)
+    }
+
+    override suspend fun parseFileAndDetectDuplicates(
+        fileBytes: ByteArray,
+        fileName: String,
+        mimeType: String?,
+        userId: String,
+        password: String?
+    ): StatementParseResult {
+        val detected = FileTypeDetector.detect(fileBytes, fileName, mimeType)
+
+        return when (detected) {
+            FileTypeDetector.FileType.CSV -> {
+                val csvResult = CsvStatementParser.parse(ByteArrayInputStream(fileBytes), userId)
+                if (!csvResult.isSuccess || csvResult.transactions.isEmpty()) {
+                    StatementParseResult(
+                        isSuccess = csvResult.isSuccess,
+                        errorMessage = csvResult.errorMessage,
+                        transactions = emptyList(),
+                        totalRowsInFile = csvResult.totalRowsInFile,
+                        detectedFormat = DetectedFileFormat.CSV,
+                        detectedBank = null,
+                        extractionWarnings = emptyList()
+                    )
+                } else {
+                    val enriched = duplicateDetector.detectDuplicates(csvResult.transactions, userId)
+                    StatementParseResult(
+                        isSuccess = true,
+                        transactions = enriched,
+                        totalRowsInFile = csvResult.totalRowsInFile,
+                        detectedFormat = DetectedFileFormat.CSV,
+                        detectedBank = null,
+                        extractionWarnings = emptyList()
+                    )
+                }
+            }
+
+            FileTypeDetector.FileType.PDF -> {
+                val pdfResult = PdfStatementExtractor.extract(fileBytes, userId, password)
+                if (pdfResult.requiresPassword) {
+                    StatementParseResult(
+                        isSuccess = false,
+                        errorMessage = pdfResult.errorMessage,
+                        transactions = emptyList(),
+                        totalRowsInFile = 0,
+                        detectedFormat = DetectedFileFormat.PDF,
+                        detectedBank = pdfResult.detectedBank,
+                        extractionWarnings = pdfResult.extractionWarnings,
+                        requiresPassword = true,
+                        pdfDocumentType = pdfResult.documentType
+                    )
+                } else if (!pdfResult.isSuccess || pdfResult.transactions.isEmpty()) {
+                    StatementParseResult(
+                        isSuccess = false,
+                        errorMessage = pdfResult.errorMessage ?: "Failed to extract transactions from PDF.",
+                        transactions = emptyList(),
+                        totalRowsInFile = pdfResult.totalRowsInFile,
+                        detectedFormat = DetectedFileFormat.PDF,
+                        detectedBank = pdfResult.detectedBank,
+                        extractionWarnings = pdfResult.extractionWarnings,
+                        requiresPassword = false,
+                        pdfDocumentType = pdfResult.documentType
+                    )
+                } else {
+                    val enriched = duplicateDetector.detectDuplicates(pdfResult.transactions, userId)
+                    StatementParseResult(
+                        isSuccess = true,
+                        transactions = enriched,
+                        totalRowsInFile = pdfResult.totalRowsInFile,
+                        detectedFormat = DetectedFileFormat.PDF,
+                        detectedBank = pdfResult.detectedBank,
+                        extractionWarnings = pdfResult.extractionWarnings,
+                        requiresPassword = false,
+                        pdfDocumentType = pdfResult.documentType
+                    )
+                }
+            }
+
+            FileTypeDetector.FileType.UNKNOWN -> {
+                StatementParseResult(
+                    isSuccess = false,
+                    errorMessage = "Unsupported file format. Please upload a standard CSV or PDF bank statement.",
+                    detectedFormat = DetectedFileFormat.UNKNOWN
+                )
+            }
+        }
     }
 
     override suspend fun saveImportedTransactions(
@@ -121,13 +219,16 @@ class StatementImportRepositoryImpl(
             var totalDebitPaise = 0L
             var totalCreditPaise = 0L
 
+            val isPdf = fileName.lowercase(Locale.US).endsWith(".pdf")
+            val source = if (isPdf) TransactionSource.PDF_IMPORT else TransactionSource.CSV_IMPORT
+
             val entitiesToSave = safeToInsert.map { item ->
                 if (item.direction == TransactionDirection.DEBIT) {
                     totalDebitPaise += item.amountPaise
                 } else {
                     totalCreditPaise += item.amountPaise
                 }
-                item.toEntity(userId)
+                item.toEntity(userId, source)
             }
 
             if (entitiesToSave.isNotEmpty()) {

@@ -2,6 +2,7 @@ package com.upisegregator.app.ui.screens.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -84,6 +85,7 @@ import java.util.Locale
 fun DemoHomeScreen(
     onExitDemo: () -> Unit,
     onViewHistory: () -> Unit = {},
+    onViewAnalytics: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: DemoHomeViewModel = viewModel(factory = DemoHomeViewModel.Factory)
 ) {
@@ -264,7 +266,8 @@ fun DemoHomeScreen(
                     iconTint = AccentTeal,
                     iconBg = AccentTealLight,
                     title = "Recipient-Wise Spending Analytics",
-                    subtitle = "Milestone 7 • Daily, weekly, monthly charts of whom you pay most."
+                    subtitle = "Milestone 7 • Daily, weekly, monthly overview of your spending.",
+                    onClick = onViewAnalytics
                 )
             }
 
@@ -634,10 +637,13 @@ private fun FeaturePreviewCard(
     iconBg: Color,
     title: String,
     subtitle: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         shape = CardShape,
         colors = CardDefaults.cardColors(containerColor = BackgroundWhite),
         border = BorderStroke(1.dp, BorderLight)

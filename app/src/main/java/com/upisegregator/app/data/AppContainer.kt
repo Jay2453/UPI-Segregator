@@ -3,6 +3,8 @@ package com.upisegregator.app.data
 import android.content.Context
 import com.upisegregator.app.data.demo.DemoDataManager
 import com.upisegregator.app.data.local.database.AppDatabase
+import com.upisegregator.app.data.repository.AnalyticsRepository
+import com.upisegregator.app.data.repository.AnalyticsRepositoryImpl
 import com.upisegregator.app.data.repository.CategoryRepository
 import com.upisegregator.app.data.repository.CategoryRepositoryImpl
 import com.upisegregator.app.data.repository.ManualExpenseRepository
@@ -27,6 +29,7 @@ interface AppContainer {
     val categoryRepository: CategoryRepository
     val userRepository: UserRepository
     val manualExpenseRepository: ManualExpenseRepository
+    val analyticsRepository: AnalyticsRepository
     val statementImportRepository: com.upisegregator.app.data.importer.StatementImportRepository
     val sessionManager: SessionManager
     val demoDataManager: DemoDataManager
@@ -48,6 +51,10 @@ class AppContainerImpl(context: Context) : AppContainer {
 
     override val manualExpenseRepository: ManualExpenseRepository by lazy {
         ManualExpenseRepositoryImpl(database.manualExpenseDao())
+    }
+
+    override val analyticsRepository: AnalyticsRepository by lazy {
+        AnalyticsRepositoryImpl(database.analyticsDao())
     }
 
     override val statementImportRepository: com.upisegregator.app.data.importer.StatementImportRepository by lazy {

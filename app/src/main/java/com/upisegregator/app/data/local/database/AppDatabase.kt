@@ -8,6 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.upisegregator.app.data.local.converters.Converters
+import com.upisegregator.app.data.local.dao.AnalyticsDao
 import com.upisegregator.app.data.local.dao.CategoryDao
 import com.upisegregator.app.data.local.dao.ManualExpenseDao
 import com.upisegregator.app.data.local.dao.RecipientDao
@@ -38,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun recipientDao(): RecipientDao
     abstract fun categoryDao(): CategoryDao
     abstract fun manualExpenseDao(): ManualExpenseDao
+    abstract fun analyticsDao(): AnalyticsDao
 
     companion object {
         private const val DATABASE_NAME = "upi_segregator.db"

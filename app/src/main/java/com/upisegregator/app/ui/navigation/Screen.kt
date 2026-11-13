@@ -34,5 +34,8 @@ sealed class Screen(val route: String) {
 
     // Bank Statement Import Flow (Milestone 6)
     data object StatementImport : Screen("statement_import")
+
+    // Analytics Dashboard (Milestone 7)
+    data object Analytics : Screen("analytics")
 }
 

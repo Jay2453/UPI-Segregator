@@ -76,6 +76,7 @@ fun UserHomeScreen(
     onAddManualExpense: () -> Unit = {},
     onViewManualExpenses: () -> Unit = {},
     onImportStatement: () -> Unit = {},
+    onViewAnalytics: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: UserHomeViewModel = viewModel(factory = UserHomeViewModel.Factory)
 ) {
@@ -390,6 +391,14 @@ fun UserHomeScreen(
                 onClick = onImportStatement
             )
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            PrimaryButton(
+                text = "📊 Spending Analytics Dashboard",
+                onClick = onViewAnalytics,
+                containerColor = AccentTeal
+            )
+
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
@@ -440,7 +449,8 @@ fun UserHomeScreen(
                 iconTint = AccentTeal,
                 iconBg = AccentTealLight,
                 title = "Recipient-Wise Spending Analytics",
-                subtitle = "Milestone 7 • Daily, weekly, monthly charts of whom you pay most."
+                subtitle = "Milestone 7 • Daily, weekly, monthly overview of your spending.",
+                onClick = onViewAnalytics
             )
 
             Spacer(modifier = Modifier.height(24.dp))

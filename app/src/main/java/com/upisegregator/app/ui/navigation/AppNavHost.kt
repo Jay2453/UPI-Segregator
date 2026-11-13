@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import com.upisegregator.app.ui.screens.analytics.AnalyticsScreen
 import com.upisegregator.app.ui.screens.auth.AuthViewModel
 import com.upisegregator.app.ui.screens.auth.LoginScreen
 import com.upisegregator.app.ui.screens.auth.SignupScreen
@@ -107,6 +108,9 @@ fun AppNavHost(
                 },
                 onViewHistory = {
                     navController.navigate(Screen.TransactionHistory.route)
+                },
+                onViewAnalytics = {
+                    navController.navigate(Screen.Analytics.route)
                 }
             )
         }
@@ -133,6 +137,9 @@ fun AppNavHost(
                 },
                 onImportStatement = {
                     navController.navigate(Screen.StatementImport.route)
+                },
+                onViewAnalytics = {
+                    navController.navigate(Screen.Analytics.route)
                 }
             )
         }
@@ -254,6 +261,13 @@ fun AppNavHost(
                 onEditExpense = { expenseId ->
                     navController.navigate(Screen.AddManualExpense.createRoute(expenseId))
                 }
+            )
+        }
+
+        // ── Analytics Dashboard (Milestone 7) ──────────────────────────────────
+        composable(Screen.Analytics.route) {
+            AnalyticsScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }

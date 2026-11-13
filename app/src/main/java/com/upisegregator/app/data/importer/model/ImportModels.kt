@@ -60,9 +60,10 @@ data class ImportableTransaction(
      * - Only confirmed SUCCESS transactions count toward spending.
      * - Only DEBITs represent expenses.
      */
-    fun toEntity(userId: String): TransactionEntity {
+    fun toEntity(userId: String, source: TransactionSource = TransactionSource.CSV_IMPORT): TransactionEntity {
+        val prefix = if (source == TransactionSource.PDF_IMPORT) "pdf_" else "csv_"
         return TransactionEntity(
-            transactionId = "csv_${fingerprint}",
+            transactionId = "${prefix}${fingerprint}",
             amountPaise = amountPaise,
             recipientId = null,
             recipientName = recipientName,
@@ -71,7 +72,7 @@ data class ImportableTransaction(
             note = description,
             transactionDate = dateMillis,
             transactionStatus = TransactionStatus.SUCCESS,
-            transactionSource = TransactionSource.CSV_IMPORT,
+            transactionSource = source,
             externalReference = externalReference?.takeIf { it.isNotBlank() },
             fingerprint = fingerprint,
             userId = userId,
