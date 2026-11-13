@@ -24,6 +24,7 @@ import com.upisegregator.app.data.upi.UpiAppPreferenceManager
 import com.upisegregator.app.data.upi.UpiIdValidation
 import com.upisegregator.app.data.upi.UpiIntentBuilder
 import com.upisegregator.app.data.upi.UpiLaunchResult
+import com.upisegregator.app.data.upi.UpiPaymentType
 import com.upisegregator.app.data.upi.UpiQrData
 import com.upisegregator.app.data.upi.UpiResponseParser
 import com.upisegregator.app.data.upi.UpiResponseStatus
@@ -63,7 +64,9 @@ data class QrPaymentDetailsUiState(
     val amountError: String? = null,
     val generalError: String? = null,
     val isScanning: Boolean = false,
-    val rawQrString: String = ""
+    val rawQrString: String = "",
+    val originalQrData: UpiQrData? = null,
+    val paymentType: UpiPaymentType = UpiPaymentType.UNKNOWN
 )
 
 data class PaymentEntryUiState(
@@ -100,7 +103,10 @@ data class PaymentReviewUiState(
     val selectedApp: UpiApp? = null,
     val transactionId: String = "",
     val isLaunching: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val originalQrData: UpiQrData? = null,
+    val paymentType: UpiPaymentType = UpiPaymentType.UNKNOWN,
+    val regeneratedUriString: String? = null
 )
 
 data class PaymentOutcomeUiState(
@@ -188,7 +194,9 @@ class PaymentViewModel(
                 purpose = qrData.purpose,
                 amountError = null,
                 generalError = null,
-                rawQrString = qrData.rawQrString
+                rawQrString = qrData.rawQrString,
+                originalQrData = qrData,
+                paymentType = qrData.paymentType
             )
         }
 
@@ -221,7 +229,7 @@ class PaymentViewModel(
     }
 
     /**
-     * Validates payment amount according to Smart Amount Mode.
+     * Validates payment amount according to Smart Amount Mode with BigDecimal precision.
      * Returns validated amount in integer paise (Long), or null if invalid.
      */
     fun validateAndGetDetailsPaise(): Long? {
@@ -235,14 +243,16 @@ class PaymentViewModel(
             return state.amountPaise
         }
 
-        val parsedPaise = PaiseUtils.rupeesToPaiseOrNull(state.amountText)
-        if (parsedPaise == null || parsedPaise <= 0L) {
-            _detailsState.update { it.copy(amountError = "Enter a valid amount greater than ₹0") }
-            return null
+        when (val validation = PaiseUtils.validateRupeeAmount(state.amountText, state.currency)) {
+            is PaiseUtils.AmountValidationResult.Valid -> {
+                _detailsState.update { it.copy(amountPaise = validation.amountPaise, amountError = null) }
+                return validation.amountPaise
+            }
+            is PaiseUtils.AmountValidationResult.Invalid -> {
+                _detailsState.update { it.copy(amountError = validation.reason) }
+                return null
+            }
         }
-
-        _detailsState.update { it.copy(amountPaise = parsedPaise, amountError = null) }
-        return parsedPaise
     }
 
     // ── Payment Entry State (Legacy & Fallback) ──────────────────────────────
@@ -338,6 +348,19 @@ class PaymentViewModel(
         val recipientName = details.recipientName.ifBlank { entry.recipientName }.trim()
         val upiId = details.upiId.ifBlank { entry.upiId }.trim()
         val note = details.note.ifBlank { entry.note }.trim()
+        val originalQr = details.originalQrData
+        val paymentType = originalQr?.paymentType ?: UpiPaymentType.P2P
+
+        // Pre-generate & validate the regenerated payload internally
+        val regenerated = try {
+            if (originalQr != null) {
+                UpiIntentBuilder.regenerateUpiUriString(originalQr, amountPaise, note)
+            } else {
+                UpiIntentBuilder.buildUpiUriString(upiId, recipientName, amountPaise, note, details.transactionRef)
+            }
+        } catch (_: Exception) {
+            null
+        }
 
         _reviewState.update {
             it.copy(
@@ -352,6 +375,9 @@ class PaymentViewModel(
                 purpose = details.purpose,
                 isAmountFixed = details.isAmountFixed,
                 selectedApp = picker.selectedApp,
+                originalQrData = originalQr,
+                paymentType = paymentType,
+                regeneratedUriString = regenerated,
                 error = null
             )
         }
@@ -365,8 +391,10 @@ class PaymentViewModel(
      * 2. Insert recipient into Room (or reuse existing).
      * 3. Insert PENDING transaction into Room with generated UUID.
      * 4. Persist active transaction ID across process recreation in SessionManager and in-memory cache.
-     * 5. Construct properly formatted UPI payment intent with tr, cu=INR, and decimal am.
-     * 6. Return the launch intent along with the exact transactionId.
+     * 5. Construct properly formatted UPI payment intent with tr, cu=INR, and decimal am,
+     *    regenerating payload while strictly preserving all original merchant and NPCI parameters.
+     * 6. Re-parse regenerated payload through UpiQrParser to validate payload integrity before launch.
+     * 7. Return the launch intent along with the exact transactionId.
      */
     fun createPendingAndLaunch(
         context: Context,
@@ -437,12 +465,13 @@ class PaymentViewModel(
                 // Store transactionId in review state
                 _reviewState.update { it.copy(transactionId = transactionId) }
 
-                // 3. Central redirection: build validated standard UPI URI and resolve target intent
+                // 3. Central redirection: regenerate and validate URI preserving original parameters, and resolve target intent
                 val targetPackage = review.selectedApp?.packageName
                     ?: upiPrefs.getValidatedPreferredPackage()
 
                 val redirection = UpiIntentBuilder.buildPaymentRedirection(
                     context = context,
+                    originalData = review.originalQrData,
                     payeeUpiId = review.upiId,
                     payeeName = review.recipientName,
                     amountPaise = review.amountPaise,

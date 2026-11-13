@@ -17,6 +17,68 @@ object PaiseUtils {
     private val indianLocale = Locale("en", "IN")
 
     /**
+     * Result of validating a rupee amount string with BigDecimal precision.
+     */
+    sealed class AmountValidationResult {
+        data class Valid(
+            val amountPaise: Long,
+            val formattedRupees: String,
+            val decimal: BigDecimal
+        ) : AmountValidationResult()
+
+        data class Invalid(val reason: String) : AmountValidationResult()
+    }
+
+    /**
+     * Comprehensive BigDecimal validation of rupee amounts.
+     * Enforces:
+     * - Non-blank, parseable decimal number
+     * - Strictly positive (> 0)
+     * - Decimal precision: at most 2 decimal places
+     * - Currency code: strictly "INR" if currency is supplied
+     */
+    fun validateRupeeAmount(
+        amountString: String?,
+        currency: String? = "INR"
+    ): AmountValidationResult {
+        val trimmed = amountString?.trim()?.replace(",", "")?.replace("₹", "")?.trim()
+        if (trimmed.isNullOrBlank()) {
+            return AmountValidationResult.Invalid("Amount cannot be empty")
+        }
+
+        if (!currency.isNullOrBlank() && !currency.equals("INR", ignoreCase = true)) {
+            return AmountValidationResult.Invalid("Unsupported currency '$currency'. Only INR payments are supported.")
+        }
+
+        val decimal = try {
+            BigDecimal(trimmed)
+        } catch (_: NumberFormatException) {
+            return AmountValidationResult.Invalid("Invalid amount format: '$amountString'")
+        }
+
+        if (decimal <= BigDecimal.ZERO) {
+            return AmountValidationResult.Invalid("Amount must be strictly positive")
+        }
+
+        // Check decimal precision: at most 2 decimal places
+        val stripped = decimal.stripTrailingZeros()
+        val effectiveScale = if (stripped.scale() < 0) 0 else stripped.scale()
+        if (effectiveScale > 2) {
+            return AmountValidationResult.Invalid("Amount cannot have more than 2 decimal places")
+        }
+
+        val paiseDecimal = decimal.multiply(BigDecimal(100)).setScale(0, RoundingMode.UNNECESSARY)
+        val paise = try {
+            paiseDecimal.longValueExact()
+        } catch (_: ArithmeticException) {
+            return AmountValidationResult.Invalid("Amount exceeds maximum supported limit")
+        }
+
+        val formattedRupees = paiseToRupeesString(paise)
+        return AmountValidationResult.Valid(paise, formattedRupees, decimal)
+    }
+
+    /**
      * Converts a rupee string (e.g., "120", "120.50", " 1500.75 ") into integer paise.
      * Throws [IllegalArgumentException] if format is invalid or amount is negative.
      */
@@ -41,11 +103,9 @@ object PaiseUtils {
      * Safely converts rupee string to paise, returning null if invalid or <= 0.
      */
     fun rupeesToPaiseOrNull(rupeesString: String?): Long? {
-        if (rupeesString.isNullOrBlank()) return null
-        return try {
-            rupeesToPaise(rupeesString)
-        } catch (_: Exception) {
-            null
+        return when (val v = validateRupeeAmount(rupeesString)) {
+            is AmountValidationResult.Valid -> v.amountPaise
+            is AmountValidationResult.Invalid -> null
         }
     }
 

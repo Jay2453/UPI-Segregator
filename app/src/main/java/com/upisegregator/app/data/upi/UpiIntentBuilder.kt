@@ -193,6 +193,108 @@ object UpiIntentBuilder {
     }
 
     /**
+     * Internally regenerates an amount-prefilled UPI payment URI from an original scanned QR payload,
+     * preserving all relevant original parameters (merchant code, terminal ID, mode, orgid, etc.).
+     *
+     * SECURITY & COMPLIANCE RULES:
+     * - Uses exact decimal rupees formatting (e.g. 10.00).
+     * - Strictly prevents altering fixed-amount QR payloads.
+     * - Preserves P2P vs P2M characteristics — never injects synthetic merchant parameters into P2P QR.
+     * - Preserves all original query parameters (mc, tr, mode, purpose, orgid, tid, mid, url, sign, etc.).
+     * - Never adds empty note parameters.
+     */
+    fun regenerateUpiUriString(
+        originalData: UpiQrData,
+        amountPaise: Long,
+        overrideNote: String? = null
+    ): String {
+        require(amountPaise > 0L) { "Amount must be strictly positive" }
+
+        // If the original QR had a fixed amount, it must not be modified
+        if (originalData.isAmountFixed && originalData.amountPaise != null) {
+            require(originalData.amountPaise == amountPaise) {
+                "Cannot alter amount for a fixed-amount QR code (original: ${originalData.amountPaise} paise, requested: $amountPaise paise)"
+            }
+        }
+
+        val trimmedUpiId = originalData.upiId.trim()
+        val validation = validateUpiId(trimmedUpiId)
+        require(validation is UpiIdValidation.Valid) {
+            (validation as UpiIdValidation.Invalid).reason
+        }
+
+        val amountString = PaiseUtils.paiseToRupeesString(amountPaise)
+        val name = originalData.recipientName.trim().ifBlank { trimmedUpiId }
+
+        val encodeParam = { s: String ->
+            URLEncoder.encode(s, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        }
+
+        val sb = StringBuilder("upi://pay?")
+        sb.append("pa=").append(encodeParam(trimmedUpiId))
+        sb.append("&pn=").append(encodeParam(name))
+
+        // Preserve Merchant Code (mc) if present
+        val mc = originalData.merchantCode ?: originalData.allParameters["mc"]
+        if (!mc.isNullOrBlank()) {
+            sb.append("&mc=").append(encodeParam(mc.trim()))
+        }
+
+        // Preserve Transaction Reference (tr) if present
+        val tr = originalData.transactionRef ?: originalData.allParameters["tr"]
+        if (!tr.isNullOrBlank()) {
+            sb.append("&tr=").append(encodeParam(tr.trim()))
+        }
+
+        // Standard amount and currency
+        sb.append("&am=").append(amountString)
+        sb.append("&cu=INR")
+
+        // Note (tn)
+        val cleanNote = (overrideNote?.takeIf { it.isNotBlank() } ?: originalData.note).trim().take(50)
+        if (cleanNote.isNotEmpty()) {
+            sb.append("&tn=").append(encodeParam(cleanNote))
+        }
+
+        // Preserve all remaining original parameters (excluding pa, pn, mc, tr, am, cu, tn)
+        val standardHandled = setOf("pa", "pn", "mc", "tr", "am", "cu", "tn")
+
+        if (originalData.allParameters.isNotEmpty()) {
+            for ((key, value) in originalData.allParameters) {
+                val lowerKey = key.lowercase()
+                if (lowerKey !in standardHandled && value.isNotBlank()) {
+                    sb.append("&").append(encodeParam(key)).append("=").append(encodeParam(value.trim()))
+                }
+            }
+        } else {
+            // Fallback for manually instantiated UpiQrData
+            originalData.mode?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&mode=").append(encodeParam(it.trim()))
+            }
+            originalData.purpose?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&purpose=").append(encodeParam(it.trim()))
+            }
+            originalData.terminalId?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&tid=").append(encodeParam(it.trim()))
+            }
+            originalData.merchantId?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&mid=").append(encodeParam(it.trim()))
+            }
+            originalData.orgId?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&orgid=").append(encodeParam(it.trim()))
+            }
+            originalData.url?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&url=").append(encodeParam(it.trim()))
+            }
+            originalData.sign?.takeIf { it.isNotBlank() }?.let {
+                sb.append("&sign=").append(encodeParam(it.trim()))
+            }
+        }
+
+        return sb.toString()
+    }
+
+    /**
      * Builds a standard android.net.Uri using [buildUpiUriString].
      */
     fun buildUpiUri(
@@ -274,90 +376,178 @@ object UpiIntentBuilder {
      * 7. Ensures there are no duplicate query parameters.
      * 8. Emits safe diagnostic logging with masked recipient and no sensitive data.
      */
-    fun validateUpiUriString(
-        uriString: String,
+    /**
+     * VALIDATION LAYER:
+     * Validates a generated/regenerated UPI URI against expected financial parameters
+     * by passing it directly through our existing [UpiQrParser] (Requirement 6).
+     *
+     * 1. Parses the regenerated URI through [UpiQrParser.parse].
+     * 2. Verifies recipient UPI ID matches expected and is valid.
+     * 3. Verifies currency is strictly INR.
+     * 4. Verifies parsed paise matches expected amount.
+     * 5. Ensures amount is strictly formatted as decimal rupees with 2 decimal places.
+     * 6. Ensures there are no duplicate query parameters.
+     * 7. Ensures original fixed-amount QR codes have not had their amount modified.
+     * 8. Ensures P2P/P2M classification is preserved (prevents accidental P2P to P2M conversion).
+     * 9. Ensures original merchant metadata (mc, tr, mode, tid, etc.) is preserved.
+     * 10. Emits safe diagnostic logging with masked recipient and no sensitive data.
+     */
+    fun validateRegeneratedPayload(
+        regeneratedUriString: String,
         expectedPaise: Long,
         expectedUpiId: String,
+        originalData: UpiQrData? = null,
         selectedPackage: String? = null
     ): UpiUriValidationResult {
-        val trimmedUri = uriString.trim()
+        val trimmedUri = regeneratedUriString.trim()
         if (!trimmedUri.startsWith("upi://pay?") && !trimmedUri.startsWith("upi:pay?")) {
             return UpiUriValidationResult.Invalid("Invalid UPI URI format: must start with upi://pay?")
         }
 
-        val parsed = parseUpiUriString(trimmedUri)
-
-        // 1. Check for duplicate parameters
-        if (parsed.duplicateKeys.isNotEmpty()) {
-            return UpiUriValidationResult.Invalid("Duplicate parameter(s) found in UPI URI: ${parsed.duplicateKeys.joinToString()}")
+        // 1. Pass through existing QR parser (Requirement 6)
+        val parseResult = UpiQrParser.parse(trimmedUri)
+        if (parseResult is UpiQrParseResult.Invalid) {
+            return UpiUriValidationResult.Invalid("Regenerated URI failed QR parser validation: ${parseResult.reason}")
         }
 
-        // 2. Verify recipient UPI ID
-        val pa = parsed.pa
-        if (pa.isNullOrBlank()) {
-            return UpiUriValidationResult.Invalid("Missing payee UPI ID (pa)")
+        val reparsed = (parseResult as UpiQrParseResult.Success).data
+
+        // 2. Check for duplicate query parameters
+        val uriParamDetails = parseUpiUriString(trimmedUri)
+        if (uriParamDetails.duplicateKeys.isNotEmpty()) {
+            return UpiUriValidationResult.Invalid(
+                "Duplicate parameter(s) found in regenerated URI: ${uriParamDetails.duplicateKeys.joinToString()}"
+            )
         }
-        if (!pa.equals(expectedUpiId.trim(), ignoreCase = true)) {
-            return UpiUriValidationResult.Invalid("Recipient UPI ID mismatch: expected $expectedUpiId, got $pa")
+
+        // 3. Verify recipient UPI ID matches
+        if (!reparsed.upiId.equals(expectedUpiId.trim(), ignoreCase = true)) {
+            return UpiUriValidationResult.Invalid(
+                "Recipient UPI ID mismatch: expected $expectedUpiId, got ${reparsed.upiId}"
+            )
         }
-        val idValidation = validateUpiId(pa)
+        val idValidation = validateUpiId(reparsed.upiId)
         if (idValidation is UpiIdValidation.Invalid) {
             return UpiUriValidationResult.Invalid("Invalid recipient UPI ID: ${idValidation.reason}")
         }
 
-        // 3. Verify currency is INR
-        val cu = parsed.cu
-        if (cu.isNullOrBlank() || !cu.equals("INR", ignoreCase = true)) {
-            return UpiUriValidationResult.Invalid("Invalid currency: expected INR, got $cu")
+        // 4. Verify currency is strictly INR
+        if (!reparsed.currency.equals("INR", ignoreCase = true)) {
+            return UpiUriValidationResult.Invalid(
+                "Invalid currency: expected INR, got ${reparsed.currency}"
+            )
         }
 
-        // 4. Verify amount format and parse back to paise
-        val am = parsed.am
+        // 5. Verify amount format and parse back to paise
+        val am = uriParamDetails.am
         if (am.isNullOrBlank()) {
             return UpiUriValidationResult.Invalid("Missing amount (am)")
         }
         if (!Regex("^\\d+\\.\\d{2}$").matches(am)) {
-            return UpiUriValidationResult.Invalid("Amount must be formatted as decimal rupees (e.g. 10.00), got: $am")
-        }
-        val parsedPaise = try {
-            PaiseUtils.rupeesToPaise(am)
-        } catch (e: Exception) {
-            return UpiUriValidationResult.Invalid("Failed to parse URI amount '$am' to paise: ${e.message}")
-        }
-
-        if (parsedPaise != expectedPaise) {
             return UpiUriValidationResult.Invalid(
-                "Amount mismatch: expected $expectedPaise paise, but URI parsed as $parsedPaise paise"
+                "Amount must be formatted as decimal rupees (e.g. 10.00), got: $am"
             )
         }
 
-        // 5. Ensure no empty tn= parameter
-        if (parsed.allParamNames.contains("tn") && parsed.tn.isNullOrBlank()) {
+        if (reparsed.amountPaise == null || reparsed.amountPaise != expectedPaise) {
+            return UpiUriValidationResult.Invalid(
+                "Amount mismatch: expected $expectedPaise paise, but URI parsed as ${reparsed.amountPaise} paise"
+            )
+        }
+
+        // 6. Ensure no empty tn= parameter
+        if (uriParamDetails.allParamNames.contains("tn") && uriParamDetails.tn.isNullOrBlank()) {
             return UpiUriValidationResult.Invalid("Empty note parameter 'tn' should not be present in URI")
         }
 
-        // 6. Safe diagnostic logging
+        // 7. Verify parameter preservation against original QR (if available)
+        if (originalData != null) {
+            // Fixed-amount QR protection
+            if (originalData.isAmountFixed && originalData.amountPaise != null && reparsed.amountPaise != originalData.amountPaise) {
+                return UpiUriValidationResult.Invalid(
+                    "Cannot modify amount on a fixed-amount QR code: original was ${originalData.amountPaise} paise"
+                )
+            }
+
+            // Prevent accidental P2P to P2M conversion
+            if (originalData.paymentType == UpiPaymentType.P2P && !reparsed.merchantCode.isNullOrBlank()) {
+                return UpiUriValidationResult.Invalid(
+                    "Accidental P2P to P2M conversion: merchant code '${reparsed.merchantCode}' was added to P2P payment"
+                )
+            }
+
+            // Verify payment type classification is preserved
+            if (originalData.paymentType != UpiPaymentType.UNKNOWN && reparsed.paymentType != originalData.paymentType) {
+                return UpiUriValidationResult.Invalid(
+                    "Payment type classification changed: expected ${originalData.paymentType}, got ${reparsed.paymentType}"
+                )
+            }
+
+            // Merchant Code preservation
+            val origMc = originalData.merchantCode ?: originalData.allParameters["mc"]
+            if (!origMc.isNullOrBlank() && reparsed.merchantCode != origMc) {
+                return UpiUriValidationResult.Invalid(
+                    "Merchant code lost or altered: expected '$origMc', got '${reparsed.merchantCode}'"
+                )
+            }
+
+            // Transaction Reference preservation
+            val origTr = originalData.transactionRef ?: originalData.allParameters["tr"]
+            if (!origTr.isNullOrBlank() && reparsed.transactionRef != origTr) {
+                return UpiUriValidationResult.Invalid(
+                    "Transaction reference lost or altered: expected '$origTr', got '${reparsed.transactionRef}'"
+                )
+            }
+
+            // Mode preservation
+            val origMode = originalData.mode ?: originalData.allParameters["mode"]
+            if (!origMode.isNullOrBlank() && reparsed.mode != origMode) {
+                return UpiUriValidationResult.Invalid(
+                    "Mode parameter lost or altered: expected '$origMode', got '${reparsed.mode}'"
+                )
+            }
+        }
+
+        // 8. Safe diagnostic logging
         val maskedRecipient = maskUpiId(expectedUpiId)
         logSafeValidationDiagnostic(
             originalPaise = expectedPaise,
             formattedRupees = am,
-            parsedPaise = parsedPaise,
+            parsedPaise = reparsed.amountPaise,
             selectedPackage = selectedPackage,
-            paramNames = parsed.allParamNames,
+            paramNames = uriParamDetails.allParamNames,
             maskedRecipient = maskedRecipient
         )
 
         return UpiUriValidationResult.Valid(
             uriString = trimmedUri,
             originalPaise = expectedPaise,
-            parsedPaise = parsedPaise,
+            parsedPaise = reparsed.amountPaise,
             recipientMasked = maskedRecipient,
-            paramNames = parsed.allParamNames
+            paramNames = uriParamDetails.allParamNames
         )
     }
 
     /**
-     * Validates an android.net.Uri using [validateUpiUriString].
+     * Backward-compatible validator method. Delegates to [validateRegeneratedPayload].
+     */
+    fun validateUpiUriString(
+        uriString: String,
+        expectedPaise: Long,
+        expectedUpiId: String,
+        selectedPackage: String? = null
+    ): UpiUriValidationResult {
+        return validateRegeneratedPayload(
+            regeneratedUriString = uriString,
+            expectedPaise = expectedPaise,
+            expectedUpiId = expectedUpiId,
+            originalData = null,
+            selectedPackage = selectedPackage
+        )
+    }
+
+    /**
+     * Validates an android.net.Uri using [validateRegeneratedPayload].
      */
     fun validateUpiUri(
         uri: Uri,
@@ -365,7 +555,7 @@ object UpiIntentBuilder {
         expectedUpiId: String,
         selectedPackage: String? = null
     ): UpiUriValidationResult {
-        return validateUpiUriString(uri.toString(), expectedPaise, expectedUpiId, selectedPackage)
+        return validateRegeneratedPayload(uri.toString(), expectedPaise, expectedUpiId, null, selectedPackage)
     }
 
     /**
@@ -411,19 +601,16 @@ object UpiIntentBuilder {
 
     /**
      * CENTRAL REDIRECTION FUNCTION:
-     * One clear redirection function that accepts:
-     * - Recipient UPI ID
-     * - Recipient name
-     * - Amount in paise
-     * - Selected UPI application package
-     * (and optional note and transactionRef)
+     * Builds and validates a payment redirection using internal QR payload regeneration.
      *
-     * Validates the generated URI before creating the intent.
-     * The selected package determines ONLY which app receives the URI;
-     * it never modifies the amount or recipient.
+     * 1. Preserves original QR metadata (merchant code, terminal ID, etc.) if [originalData] is provided.
+     * 2. Formats amount as decimal rupees with BigDecimal validation.
+     * 3. Re-parses and validates the generated URI string through [UpiQrParser.parse].
+     * 4. Resolves the target intent (selected app or system chooser).
      */
     fun buildPaymentRedirection(
         context: Context,
+        originalData: UpiQrData?,
         payeeUpiId: String,
         payeeName: String,
         amountPaise: Long,
@@ -432,21 +619,30 @@ object UpiIntentBuilder {
         transactionRef: String? = null
     ): PaymentRedirectionResult {
         val uriString = try {
-            buildUpiUriString(
-                payeeUpiId = payeeUpiId,
-                payeeName = payeeName,
-                amountPaise = amountPaise,
-                note = note,
-                transactionRef = transactionRef
-            )
+            if (originalData != null) {
+                regenerateUpiUriString(
+                    originalData = originalData,
+                    amountPaise = amountPaise,
+                    overrideNote = note
+                )
+            } else {
+                buildUpiUriString(
+                    payeeUpiId = payeeUpiId,
+                    payeeName = payeeName,
+                    amountPaise = amountPaise,
+                    note = note,
+                    transactionRef = transactionRef
+                )
+            }
         } catch (e: Exception) {
             return PaymentRedirectionResult.ValidationFailed(e.message ?: "Failed to build UPI URI")
         }
 
-        val validation = validateUpiUriString(
-            uriString = uriString,
+        val validation = validateRegeneratedPayload(
+            regeneratedUriString = uriString,
             expectedPaise = amountPaise,
             expectedUpiId = payeeUpiId,
+            originalData = originalData,
             selectedPackage = selectedPackage
         )
         if (validation is UpiUriValidationResult.Invalid) {
@@ -481,6 +677,30 @@ object UpiIntentBuilder {
 
         val chooserIntent = Intent.createChooser(baseIntent, "Pay with UPI")
         return PaymentRedirectionResult.Success(chooserIntent, uri)
+    }
+
+    /**
+     * Backward-compatible overload without originalData.
+     */
+    fun buildPaymentRedirection(
+        context: Context,
+        payeeUpiId: String,
+        payeeName: String,
+        amountPaise: Long,
+        selectedPackage: String?,
+        note: String = "",
+        transactionRef: String? = null
+    ): PaymentRedirectionResult {
+        return buildPaymentRedirection(
+            context = context,
+            originalData = null,
+            payeeUpiId = payeeUpiId,
+            payeeName = payeeName,
+            amountPaise = amountPaise,
+            selectedPackage = selectedPackage,
+            note = note,
+            transactionRef = transactionRef
+        )
     }
 
     /**

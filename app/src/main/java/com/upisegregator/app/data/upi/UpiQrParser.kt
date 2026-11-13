@@ -5,6 +5,18 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
+ * NPCI UPI transaction payment classification.
+ */
+enum class UpiPaymentType {
+    /** Person-to-Person payment (e.g. personal VPAs, no merchant attributes). */
+    P2P,
+    /** Person-to-Merchant payment (e.g. verified MCC, merchant identifiers). */
+    P2M,
+    /** Unclassified or ambiguous payment type (insufficient or conflicting evidence). */
+    UNKNOWN
+}
+
+/**
  * Structured data extracted from a validated UPI payment QR code.
  */
 data class UpiQrData(
@@ -20,7 +32,14 @@ data class UpiQrData(
     val mode: String? = null,
     val purpose: String? = null,
     val isAmountFixed: Boolean = false,
-    val rawQrString: String = ""
+    val rawQrString: String = "",
+    val paymentType: UpiPaymentType = UpiPaymentType.UNKNOWN,
+    val terminalId: String? = null,
+    val merchantId: String? = null,
+    val orgId: String? = null,
+    val url: String? = null,
+    val sign: String? = null,
+    val allParameters: Map<String, String> = emptyMap()
 )
 
 /**
@@ -58,6 +77,51 @@ object UpiQrParser {
     fun lookupMccDescription(code: String?): String? {
         if (code.isNullOrBlank()) return null
         return KNOWN_MCC[code.trim()] ?: "General Merchant ($code)"
+    }
+
+    /**
+     * Classifies a transaction payload as P2P, P2M, or UNKNOWN based on reliable evidence.
+     *
+     * Rules:
+     * - P2M: reliable merchant evidence (standard 4-digit numeric MCC other than "0000",
+     *   or presence of merchant terminal/store identifiers: tid, mid, msid, mtid).
+     * - P2P: standard personal transfer where mc and merchant identifiers are absent,
+     *   and a valid payee UPI ID is present.
+     * - UNKNOWN: ambiguous, unassigned, or malformed data (e.g. mc="0000", non-numeric MCC,
+     *   or insufficient evidence).
+     */
+    fun classifyPaymentType(params: Map<String, String>): UpiPaymentType {
+        val mc = params["mc"]?.trim()
+        val mid = params["mid"]?.trim()
+        val msid = params["msid"]?.trim()
+        val mtid = params["mtid"]?.trim()
+        val tid = params["tid"]?.trim()
+
+        val hasMerchantIds = !mid.isNullOrBlank() || !msid.isNullOrBlank() ||
+                !mtid.isNullOrBlank() || !tid.isNullOrBlank()
+
+        if (!mc.isNullOrBlank()) {
+            val isStandardNumericMcc = mc.length == 4 && mc.all { it.isDigit() }
+            if (isStandardNumericMcc && mc != "0000") {
+                return UpiPaymentType.P2M
+            }
+            if (hasMerchantIds) {
+                return UpiPaymentType.P2M
+            }
+            // mc is "0000", non-numeric, or malformed without merchant IDs -> UNKNOWN
+            return UpiPaymentType.UNKNOWN
+        }
+
+        if (hasMerchantIds) {
+            return UpiPaymentType.P2M
+        }
+
+        val pa = params["pa"]?.trim()
+        if (!pa.isNullOrBlank() && UpiIntentBuilder.validateUpiId(pa) is UpiIdValidation.Valid) {
+            return UpiPaymentType.P2P
+        }
+
+        return UpiPaymentType.UNKNOWN
     }
 
     /**
@@ -167,13 +231,19 @@ object UpiQrParser {
             isAmountFixed = true
         }
 
-        // 7. Extract Note (tn), Reference (tr), MCC (mc), mode, purpose
+        // 7. Extract Note (tn), Reference (tr), MCC (mc), mode, purpose, and merchant identifiers
         val note = params["tn"]?.trim() ?: ""
         val transactionRef = params["tr"]?.trim()?.takeIf { it.isNotBlank() }
         val merchantCode = params["mc"]?.trim()?.takeIf { it.isNotBlank() }
         val merchantCategoryName = lookupMccDescription(merchantCode)
         val mode = params["mode"]?.trim()?.takeIf { it.isNotBlank() }
         val purpose = params["purpose"]?.trim()?.takeIf { it.isNotBlank() }
+        val terminalId = params["tid"]?.trim()?.takeIf { it.isNotBlank() }
+        val merchantId = params["mid"]?.trim()?.takeIf { it.isNotBlank() }
+        val orgId = params["orgid"]?.trim()?.takeIf { it.isNotBlank() }
+        val url = params["url"]?.trim()?.takeIf { it.isNotBlank() }
+        val sign = params["sign"]?.trim()?.takeIf { it.isNotBlank() }
+        val paymentType = classifyPaymentType(params)
 
         return UpiQrParseResult.Success(
             UpiQrData(
@@ -189,7 +259,14 @@ object UpiQrParser {
                 mode = mode,
                 purpose = purpose,
                 isAmountFixed = isAmountFixed,
-                rawQrString = trimmed
+                rawQrString = trimmed,
+                paymentType = paymentType,
+                terminalId = terminalId,
+                merchantId = merchantId,
+                orgId = orgId,
+                url = url,
+                sign = sign,
+                allParameters = params
             )
         )
     }

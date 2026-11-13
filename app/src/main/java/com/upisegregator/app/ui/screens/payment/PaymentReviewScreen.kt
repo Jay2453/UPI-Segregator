@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -236,6 +237,15 @@ fun PaymentReviewScreen(
                         label = "Amount",
                         value = PaiseUtils.formatPaiseToCurrency(state.amountPaise)
                     )
+
+                    if (state.paymentType != com.upisegregator.app.data.upi.UpiPaymentType.UNKNOWN) {
+                        HorizontalDivider(color = BorderLight, modifier = Modifier.padding(vertical = 10.dp))
+                        ReviewRow(
+                            icon = Icons.Default.Verified,
+                            label = "Payment Type",
+                            value = if (state.paymentType == com.upisegregator.app.data.upi.UpiPaymentType.P2M) "Merchant (P2M)" else "Personal (P2P)"
+                        )
+                    }
 
                     if (!state.merchantCategoryName.isNullOrBlank()) {
                         HorizontalDivider(color = BorderLight, modifier = Modifier.padding(vertical = 10.dp))
